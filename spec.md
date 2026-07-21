@@ -1,4 +1,4 @@
-# Especificación de Feature: Gestión de facturas de gasto de ReparaPRO
+# Especificación de Feature: Gestión de facturas de gasto para MicroPymes
 
 **Rama**: `001-gestion-facturas-gasto`
 **Creada**: 2026-07-20
@@ -15,7 +15,7 @@ El resultado esperado es un registro fiable de las facturas de gasto, organizado
 
 Esta feature incluye:
 
-- revisión de correos recibidos desde el 1 de enero de 2026 que contengan documentos PDF;
+- revisión de correos recibidos que contengan documentos PDF;
 - identificación y clasificación del contenido real de cada documento;
 - extracción de los datos acreditados de cada factura de gasto;
 - validación de proveedores activos;
@@ -30,7 +30,7 @@ Esta feature incluye:
 ### Fuera de alcance
 
 - eliminar o modificar correos y adjuntos originales;
-- procesar facturas de venta emitidas por ReparaPRO como gastos;
+- procesar facturas de venta emitidas por la empresa como gastos;
 - inventar o completar datos fiscales, dominios o contactos sin evidencia;
 - decidir el tratamiento contable definitivo de notas de crédito o abonos;
 - afirmar que una factura está pagada o impagada sin evidencia suficiente;
@@ -41,8 +41,8 @@ Esta feature incluye:
 
 ## Personas implicadas
 
-- **Responsable de administración de ReparaPRO**: revisa resultados, aprueba lotes, resuelve excepciones y utiliza los informes.
-- **Responsable contable de ReparaPRO**: consulta facturas, proveedores y conciliaciones para verificar la documentación de gasto.
+- **Responsable de administración de la empresa**: revisa resultados, aprueba lotes, resuelve excepciones y utiliza los informes.
+- **Responsable contable de la empresa**: consulta facturas, proveedores y conciliaciones para verificar la documentación de gasto.
 
 ## Escenarios de usuario y pruebas *(obligatorio)*
 
@@ -52,13 +52,13 @@ Como responsable de administración, quiero que cada PDF recibido se evalúe por
 
 **Por qué esta prioridad**: toda acción posterior depende de clasificar correctamente el documento y de excluir facturas de venta o documentos que no sean facturas.
 
-**Test independiente**: se puede probar con un lote que contenga una factura de gasto, una factura emitida por ReparaPRO, un presupuesto, un albarán y un documento ilegible, verificando que cada uno recibe el estado correcto.
+**Test independiente**: se puede probar con un lote que contenga una factura de gasto, una factura emitida por la empresa, un presupuesto, un albarán y un documento ilegible, verificando que cada uno recibe el estado correcto.
 
 **Escenarios de aceptación**:
 
 1. **Dado** un PDF que contiene proveedor, número de factura, fecha, impuestos e importe total coherentes, **Cuando** se analiza el documento completo, **Entonces** se clasifica como factura de gasto candidata.
 2. **Dado** un PDF cuyo nombre contiene la palabra “factura” pero cuyo contenido es un presupuesto, **Cuando** se analiza el documento completo, **Entonces** se clasifica como `NO ES FACTURA`.
-3. **Dado** un documento emitido por ReparaPRO, **Cuando** se identifica al emisor, **Entonces** se clasifica como `FACTURA DE VENTA` y no se incorpora a los gastos.
+3. **Dado** un documento emitido por la empresa, **Cuando** se identifica al emisor, **Entonces** se clasifica como `FACTURA DE VENTA` y no se incorpora a los gastos.
 4. **Dado** un PDF ilegible o sin señales suficientes para identificar su naturaleza, **Cuando** se intenta clasificar, **Entonces** se registra como `REVISIÓN MANUAL` con el motivo correspondiente.
 5. **Dado** un correo sin archivos PDF, **Cuando** se revisa dentro del periodo, **Entonces** no se genera una factura ni se altera el correo.
 
@@ -230,7 +230,7 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 - **FR-001**: El sistema DEBE revisar los correos del periodo solicitado que contengan documentos PDF sin eliminar ni modificar sus originales.
 - **FR-002**: El sistema DEBE determinar la naturaleza de cada PDF a partir de su contenido completo y no únicamente de su nombre o del asunto del correo.
 - **FR-003**: El sistema DEBE distinguir entre `PROCESADA`, `REVISIÓN MANUAL`, `DUPLICADO IGNORADO`, `NO ES FACTURA` y `FACTURA DE VENTA`.
-- **FR-004**: El sistema DEBE excluir del gasto las facturas emitidas por ReparaPRO.
+- **FR-004**: El sistema DEBE excluir del gasto las facturas emitidas por la empresa.
 - **FR-005**: El sistema DEBE extraer, cuando estén acreditados, proveedor, identificación fiscal, número de factura, fecha de emisión, total con impuestos y moneda.
 - **FR-006**: El sistema DEBE conservar la referencia del remitente, asunto, fecha del correo, nombre original del documento y referencia del correo cuando estén disponibles.
 - **FR-007**: El sistema DEBE dejar vacío cualquier dato que no pueda respaldarse con evidencia disponible.
@@ -265,7 +265,7 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 
 - **Correo de origen**: mensaje recibido que aporta remitente, asunto, fecha, referencia y uno o varios adjuntos.
 - **Documento adjunto**: PDF candidato a clasificación; conserva su nombre original, su relación con el correo y su resultado de revisión.
-- **Factura de gasto**: documento validado que representa una obligación o gasto de ReparaPRO; contiene proveedor, identificación fiscal cuando exista, número, fecha, importe total y moneda.
+- **Factura de gasto**: documento validado que representa una obligación o gasto de la empresa; contiene proveedor, identificación fiscal cuando exista, número, fecha, importe total y moneda.
 - **Proveedor**: entidad emisora de la factura; mantiene nombre canónico, aliases acreditados, identificación fiscal, dominios confirmados y estado activo o inactivo.
 - **Registro documental**: evidencia del procesamiento de un documento; relaciona origen, datos extraídos, estado, motivo, archivo y referencias disponibles.
 - **Lote de procesamiento**: conjunto acotado de correos o documentos revisados en una ejecución; conserva alcance, resultados, errores y punto de continuidad.
@@ -293,7 +293,7 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 ## Suposiciones
 
 - Gmail continúa siendo la fuente principal de correos y adjuntos de facturas de gasto.
-- Existe un archivo documental de ReparaPRO con una carpeta específica para facturas de gasto y organización por año, trimestre y mes.
+- Existe un archivo documental de la empresa con una carpeta específica para facturas de gasto y organización por año, trimestre y mes.
 - Existe un registro de control con áreas diferenciadas para configuración, proveedores, facturas y actividad.
 - El responsable de administración tiene autoridad para aprobar lotes, activar o desactivar proveedores y resolver revisiones manuales.
 - Los proveedores utilizados para identificación automática están marcados como activos y sus datos han sido validados previamente.
@@ -301,7 +301,7 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 - La métrica principal de volumen cuenta únicamente facturas con estado `PROCESADA`.
 - Los importes de las facturas representan el total final con impuestos incluidos.
 - La ausencia de un movimiento coincidente solo describe lo observado en las fuentes bancarias aportadas.
-- Los extractos bancarios pueden no cubrir todas las cuentas, tarjetas, efectivo o fechas de pago utilizadas por ReparaPRO.
+- Los extractos bancarios pueden no cubrir todas las cuentas, tarjetas, efectivo o fechas de pago utilizadas por la empresa.
 - Las facturas históricas de un proveedor se conservan aunque ese proveedor deje de utilizarse.
 - El histórico validado hasta el 20 de julio de 2026 sirve como línea base de aceptación: 474 documentos registrados, de los que 177 constaban como procesados, 208 como no factura, 45 como duplicados ignorados y 44 como revisión manual.
 - La ejecución histórica archivó 159 facturas aprobadas sin errores de subida, duplicados creados ni enlaces ausentes.
