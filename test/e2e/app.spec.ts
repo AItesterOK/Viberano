@@ -24,3 +24,31 @@ test('expone revisión humana, proveedores y conciliación sin declarar impagos'
   await expect(page.getByText('CANDIDATA PENDIENTE').first()).toBeVisible();
   await expect(page.getByText(/impagada/i)).toHaveCount(0);
 });
+
+test('mantiene y resuelve una excepción aunque el lote pueda cerrarse', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Revisión/ }).first().click();
+  await page.getByLabel('Proveedor', { exact: true }).selectOption('sup-europa');
+  await page.getByRole('button', { name: 'Factura de gasto' }).click();
+  await page.getByRole('button', { name: 'Guardar y reevaluar' }).click();
+  await expect(page.getByRole('button', { name: 'Aprobar documento' })).toBeVisible();
+  await page.getByRole('button', { name: 'Aprobar documento' }).click();
+  await expect(page.getByText('No hay revisiones pendientes')).toBeVisible();
+});
+
+test('fusiona proveedores de forma reversible sin borrar el histórico', async ({ page }) => {
+  await page.goto('/');
+  if ((page.viewportSize()?.width ?? 1200) < 860) {
+    await page.getByRole('button', { name: /Más/ }).click();
+    await page.getByRole('button', { name: 'Proveedores' }).last().click();
+  } else {
+    await page.getByRole('button', { name: 'Proveedores' }).first().click();
+  }
+  await page.getByRole('button', { name: 'Fusionar' }).click();
+  await page.getByLabel('Proveedor de origen').selectOption('sup-logistica');
+  await page.getByLabel('Proveedor de destino').selectOption('sup-europa');
+  await page.getByLabel('Motivo y evidencia').fill('Duplicado confirmado en el escenario sintético');
+  await page.getByRole('button', { name: 'Confirmar fusión' }).click();
+  await expect(page.getByRole('dialog', { name: 'Fusionar proveedores' })).toHaveCount(0);
+  await expect(page.getByText(/También:.*Logística Demo SL/)).toBeVisible();
+});

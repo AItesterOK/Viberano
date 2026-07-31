@@ -181,6 +181,7 @@ export interface AppSettings {
 export interface AppSnapshot {
   settings: AppSettings;
   activeBatch: Batch | null;
+  reviewDocuments: InvoiceDocument[];
   invoices: InvoiceRecord[];
   suppliers: Supplier[];
   metrics: MonthlyMetric[];

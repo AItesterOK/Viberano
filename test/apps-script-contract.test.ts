@@ -34,4 +34,37 @@ describe('contrato de seguridad de Apps Script', () => {
     const allServerSource = fs.readdirSync(root).filter((name) => name.endsWith('.js')).map(source).join('\n');
     expect(allServerSource.toUpperCase()).not.toContain('IMPAGADA');
   });
+
+  it('conserva cursor por mensaje y una cola de revisión recuperable', () => {
+    const gmail = source('GmailService.js');
+    expect(gmail).toContain('PENDING_MESSAGE_IDS_JSON');
+    expect(gmail).toContain('CORREOS_PROCESADOS_JSON');
+    expect(gmail).toContain('processedIds.indexOf(messageId)');
+    expect(source('Data.js')).toContain('function reviewDocuments_()');
+    expect(source('Api.js')).toContain('function apiApproveDocument');
+  });
+
+  it('no infiere silenciosamente la moneda bancaria', () => {
+    const bank = source('BankService.js');
+    expect(bank).toContain("mapping.currency === undefined");
+    expect(bank).toContain("appError_('INVALID_BANK_CURRENCY'");
+    expect(bank).toContain('no se asumirá EUR');
+  });
+
+  it('recupera una escritura parcial sin duplicar el registro definitivo', () => {
+    const invoice = source('InvoiceService.js');
+    expect(invoice).toContain('const sameSource = existingRows.find');
+    expect(invoice).toContain("if (sameSource)");
+    expect(invoice.indexOf('if (sameSource)')).toBeLessThan(invoice.indexOf("writeInvoiceRegister_(row, 'DUPLICADO IGNORADO'"));
+  });
+
+  it('fusiona proveedores sin borrar el histórico', () => {
+    const api = source('Api.js');
+    const mergeStart = api.indexOf('function apiMergeSuppliers');
+    const mergeSource = api.slice(mergeStart);
+    expect(mergeStart).toBeGreaterThan(-1);
+    expect(mergeSource).toContain('ACTIVO: false');
+    expect(mergeSource).toContain("String(row.FASE || '') !== 'FINALIZADO'");
+    expect(mergeSource).not.toContain("APP.SHEETS.INVOICES, row.__row");
+  });
 });

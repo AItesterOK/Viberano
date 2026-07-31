@@ -1,4 +1,6 @@
 function startBatch_(payload, user, requestId) {
+  const repeated = getRows_(APP.SHEETS.BATCHES).find(function (row) { return String(row.REQUEST_ID || '') === String(requestId); });
+  if (repeated) return batchFromRow_(repeated);
   const existing = getActiveBatch_();
   if (existing) throw appError_('ACTIVE_BATCH_EXISTS', 'Ya existe un lote activo: ' + existing.id + '.');
   const config = getConfigMap_();
@@ -8,7 +10,7 @@ function startBatch_(payload, user, requestId) {
   if (dateFrom < String(config.APP_START_DATE || APP.START_DATE)) throw appError_('DATE_OUT_OF_RANGE', 'La fecha inicial no puede ser anterior a ' + (config.APP_START_DATE || APP.START_DATE) + '.');
   if (dateFrom > dateTo) throw appError_('INVALID_DATE_RANGE', 'La fecha inicial debe ser anterior o igual a la final.');
   const id = 'LOT-' + Utilities.formatDate(new Date(), APP.TIMEZONE, 'yyyyMMdd-HHmmss') + '-' + uuid_().slice(0, 6);
-  appendObject_(APP.SHEETS.BATCHES, { LOTE_ID: id, TIPO: 'GMAIL', ESTADO: 'ANALIZANDO', FECHA_DESDE: dateFrom, FECHA_HASTA: dateTo, MAX_CORREOS: max, CORREOS_REVISADOS: 0, PDF_ENCONTRADOS: 0, CURSOR: '', PROGRESO: 0, CREADO_EN: nowIso_(), CREADO_POR: user, REQUEST_ID: requestId });
+  appendObject_(APP.SHEETS.BATCHES, { LOTE_ID: id, TIPO: 'GMAIL', ESTADO: 'ANALIZANDO', FECHA_DESDE: dateFrom, FECHA_HASTA: dateTo, MAX_CORREOS: max, CORREOS_REVISADOS: 0, PDF_ENCONTRADOS: 0, CURSOR: '', PENDING_MESSAGE_IDS_JSON: '[]', PENDING_NEXT_CURSOR: '', CORREOS_PROCESADOS_JSON: '[]', PROGRESO: 0, CREADO_EN: nowIso_(), CREADO_POR: user, REQUEST_ID: requestId });
   logEvent_('INFO', 'LOTE_INICIADO', id, 'Análisis iniciado', { dateFrom: dateFrom, dateTo: dateTo, maxEmails: max }, id, requestId, user);
   return analyzeBatchSlice_(id, user, requestId);
 }
@@ -24,7 +26,8 @@ function analyzeBatchSlice_(batchId, user, requestId) {
   const started = Date.now();
   const batchRow = getRows_(APP.SHEETS.BATCHES).find(function (item) { return String(item.LOTE_ID) === String(batchId); });
   if (!batchRow) throw appError_('BATCH_NOT_FOUND', 'No se encuentra el lote solicitado.');
-  const alreadyReviewed = Number(batchRow.CORREOS_REVISADOS || 0);
+  const processedIds = safeJsonParse_(batchRow.CORREOS_PROCESADOS_JSON, []);
+  const alreadyReviewed = processedIds.length || Number(batchRow.CORREOS_REVISADOS || 0);
   const remaining = Math.max(Number(batchRow.MAX_CORREOS || 0) - alreadyReviewed, 0);
   const config = getConfigMap_();
   const sliceSize = Math.min(Number(config.APP_SLICE_SIZE || APP.SLICE_SIZE), APP.SLICE_SIZE, remaining);
@@ -35,29 +38,44 @@ function analyzeBatchSlice_(batchId, user, requestId) {
   const afterEpoch = Math.floor(new Date(String(batchRow.FECHA_DESDE) + 'T00:00:00+02:00').getTime() / 1000);
   const beforeEpoch = Math.floor(new Date(String(batchRow.FECHA_HASTA) + 'T23:59:59+02:00').getTime() / 1000) + 1;
   const query = 'after:' + afterEpoch + ' before:' + beforeEpoch + ' has:attachment filename:pdf -in:spam -in:trash';
-  const response = Gmail.Users.Messages.list('me', { q: query, maxResults: sliceSize, pageToken: String(batchRow.CURSOR || '') || undefined, includeSpamTrash: false });
-  const messages = response.messages || [];
+  let pendingIds = safeJsonParse_(batchRow.PENDING_MESSAGE_IDS_JSON, []);
+  let nextCursor = String(batchRow.PENDING_NEXT_CURSOR || '');
+  let fetchedAny = pendingIds.length > 0;
+  if (!pendingIds.length) {
+    const response = Gmail.Users.Messages.list('me', { q: query, maxResults: sliceSize, pageToken: String(batchRow.CURSOR || '') || undefined, includeSpamTrash: false });
+    pendingIds = (response.messages || []).map(function (message) { return String(message.id); });
+    nextCursor = String(response.nextPageToken || '');
+    fetchedAny = pendingIds.length > 0;
+    updateObjectRow_(APP.SHEETS.BATCHES, batchRow.__row, { PENDING_MESSAGE_IDS_JSON: JSON.stringify(pendingIds), PENDING_NEXT_CURSOR: nextCursor });
+  }
   let pdfCount = Number(batchRow.PDF_ENCONTRADOS || 0);
   let reviewed = alreadyReviewed;
-  for (let index = 0; index < messages.length; index += 1) {
+  while (pendingIds.length) {
     if (Date.now() - started > APP.EXECUTION_BUDGET_MS) break;
-    const message = Gmail.Users.Messages.get('me', messages[index].id, { format: 'full' });
+    const messageId = String(pendingIds[0]);
+    if (processedIds.indexOf(messageId) !== -1) { pendingIds.shift(); continue; }
+    const message = Gmail.Users.Messages.get('me', messageId, { format: 'full' });
     const metadata = messageMetadata_(message);
     const attachments = collectPdfAttachments_(message.payload);
-    reviewed += 1;
     attachments.forEach(function (attachment) {
-      if (Date.now() - started > APP.EXECUTION_BUDGET_MS) return;
       const sourceKey = message.id + '|' + attachment.attachmentId + '|' + attachment.filename;
       const existing = getRows_(APP.SHEETS.DOCUMENTS).find(function (row) { return String(row.SOURCE_KEY) === sourceKey; });
       if (existing) return;
       pdfCount += 1;
       analyzeAttachment_(batchId, message.id, attachment, metadata, sourceKey, user, requestId);
     });
+    processedIds.push(messageId);
+    pendingIds.shift();
+    reviewed = processedIds.length;
+    updateObjectRow_(APP.SHEETS.BATCHES, batchRow.__row, { CORREOS_REVISADOS: reviewed, PDF_ENCONTRADOS: pdfCount, PENDING_MESSAGE_IDS_JSON: JSON.stringify(pendingIds), CORREOS_PROCESADOS_JSON: JSON.stringify(processedIds) });
   }
-  const done = reviewed >= Number(batchRow.MAX_CORREOS || 0) || !response.nextPageToken || messages.length === 0;
+  if (!pendingIds.length) {
+    updateObjectRow_(APP.SHEETS.BATCHES, batchRow.__row, { CURSOR: nextCursor, PENDING_MESSAGE_IDS_JSON: '[]', PENDING_NEXT_CURSOR: '' });
+  }
+  const done = reviewed >= Number(batchRow.MAX_CORREOS || 0) || (!pendingIds.length && !nextCursor) || (!fetchedAny && !pendingIds.length);
   const status = done ? 'PENDIENTE DE APROBACIÓN' : 'ANALIZANDO';
   const progress = Number(batchRow.MAX_CORREOS || 0) ? Math.min(Math.round(reviewed / Number(batchRow.MAX_CORREOS) * 100), 100) : 100;
-  updateObjectRow_(APP.SHEETS.BATCHES, batchRow.__row, { ESTADO: status, CORREOS_REVISADOS: reviewed, PDF_ENCONTRADOS: pdfCount, CURSOR: done ? '' : String(response.nextPageToken || ''), PROGRESO: done ? 100 : progress });
+  updateObjectRow_(APP.SHEETS.BATCHES, batchRow.__row, { ESTADO: status, CORREOS_REVISADOS: reviewed, PDF_ENCONTRADOS: pdfCount, CURSOR: done ? '' : (pendingIds.length ? String(batchRow.CURSOR || '') : nextCursor), PENDING_MESSAGE_IDS_JSON: JSON.stringify(pendingIds), PENDING_NEXT_CURSOR: pendingIds.length ? nextCursor : '', CORREOS_PROCESADOS_JSON: JSON.stringify(processedIds), PROGRESO: done ? 100 : progress });
   if (done) logEvent_('INFO', 'LOTE_ANALIZADO', batchId, 'Vista previa preparada', { reviewedEmails: reviewed, pdfCount: pdfCount }, batchId, requestId, user);
   const updated = getRows_(APP.SHEETS.BATCHES).find(function (item) { return String(item.LOTE_ID) === String(batchId); });
   return batchFromRow_(updated);

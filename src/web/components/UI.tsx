@@ -1,4 +1,4 @@
-import type { PropsWithChildren, ReactNode } from 'react';
+import { Children, cloneElement, isValidElement, useId, type PropsWithChildren, type ReactElement, type ReactNode } from 'react';
 import { Icon, type IconName } from './Icon';
 
 export function StatusBadge({ status }: { status: string }) {
@@ -24,7 +24,12 @@ export function EmptyState({ icon, title, children }: PropsWithChildren<{ icon: 
 }
 
 export function Field({ label, hint, children }: PropsWithChildren<{ label: string; hint?: string }>) {
-  return <label className="field"><span className="field__label">{label}</span>{children}{hint && <span className="field__hint">{hint}</span>}</label>;
+  const generatedId = useId();
+  const hintId = hint ? `${generatedId}-hint` : undefined;
+  const child = Children.only(children);
+  const control = isValidElement(child) ? cloneElement(child as ReactElement<{ id?: string; 'aria-describedby'?: string }>, { id: (child.props as { id?: string }).id ?? generatedId, 'aria-describedby': hintId }) : child;
+  const controlId = isValidElement(control) ? (control.props as { id?: string }).id : generatedId;
+  return <div className="field"><label className="field__label" htmlFor={controlId}>{label}</label>{control}{hint && <span className="field__hint" id={hintId}>{hint}</span>}</div>;
 }
 
 export function Modal({ title, onClose, children, footer }: PropsWithChildren<{ title: string; onClose: () => void; footer?: ReactNode }>) {

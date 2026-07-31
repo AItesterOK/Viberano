@@ -309,7 +309,7 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 - La primera versión funciona exclusivamente en línea, se inicia manualmente y no utiliza servicios de inteligencia documental de pago.
 - Todas las personas autorizadas disponen de las mismas capacidades y cada acción queda atribuida.
 - La cuenta inicialmente autorizada es `compras@reparapro.com`; las incorporaciones posteriores requieren validación explícita.
-- El histórico validado hasta el 20 de julio de 2026 sirve como línea base de aceptación: 474 documentos registrados, de los que 177 constaban como procesados, 208 como no factura, 45 como duplicados ignorados y 44 como revisión manual.
+- El histórico existente se capturará como línea base durante la migración y se comparará después sin publicar sus datos ni recuentos en el repositorio.
 - La ejecución histórica archivó 159 facturas aprobadas sin errores de subida, duplicados creados ni enlaces ausentes.
 
 ## Decisiones cerradas para la primera versión

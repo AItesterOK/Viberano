@@ -19,11 +19,11 @@ El navegador no envía identidades fiables. Cada función obtiene `Session.getAc
 2. Cada PDF se recupera desde Gmail, se calcula su SHA-256 y se convierte temporalmente a Google Docs para OCR.
 3. La copia OCR creada por la aplicación se envía a la papelera al terminar; el adjunto original no se modifica.
 4. La clasificación guarda propuesta, campos y evidencia en `DOCUMENTOS`.
-5. `apiContinueBatch` avanza mediante el cursor de Gmail hasta llegar al límite solicitado.
+5. `apiContinueBatch` conserva la página, los identificadores pendientes y los correos ya terminados; una interrupción reanuda el mensaje pendiente sin saltar el resto de la página.
 6. `apiSaveDocumentReview` conserva correcciones y motivo, y vuelve a validar.
 7. `apiApproveBatch`, bajo bloqueo global, vuelve a comprobar duplicados, archiva y registra cada elemento de forma idempotente.
 
-Un documento solo recibe `PROCESADA` cuando tanto el archivo como el registro definitivo terminan correctamente. Los fallos quedan en `ERROR` y `apiRetryBatch` reintenta solo esos elementos.
+Un documento solo recibe `PROCESADA` cuando tanto el archivo como el registro definitivo terminan correctamente. Los fallos quedan en `ERROR` y `apiRetryBatch` reintenta solo esos elementos. Las excepciones permanecen en una cola transversal aunque el lote original ya esté cerrado y se pueden aprobar individualmente tras resolverlas.
 
 ## Identidad y duplicados
 

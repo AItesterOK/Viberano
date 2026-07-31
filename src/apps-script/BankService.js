@@ -1,4 +1,6 @@
 function previewBankImport_(payload, user, requestId) {
+  const repeatedEvent = eventByRequest_(requestId, 'BANCO_PREVISUALIZADO');
+  if (repeatedEvent) { const repeatedImport = bankImportById_(String(repeatedEvent.DOCUMENTO || '')); if (repeatedImport) return repeatedImport; }
   if (!payload.fileName || !payload.base64 || !payload.source || !payload.periodFrom || !payload.periodTo || !payload.coverage) throw appError_('BANK_METADATA_REQUIRED', 'Archivo, fuente, periodo y cobertura son obligatorios.');
   const bytes = Utilities.base64Decode(String(payload.base64));
   if (bytes.length > APP.MAX_UPLOAD_BYTES) throw appError_('FILE_TOO_LARGE', 'El extracto supera el límite de 12 MB.');
@@ -54,13 +56,13 @@ function normalizeBankRows_(values, explicitMapping) {
       const headers = values[rowIndex].map(normalizeText_);
       const detected = {};
       Object.keys(aliases).forEach(function (key) { const index = headers.findIndex(function (header) { return aliases[key].indexOf(header) !== -1; }); if (index >= 0) detected[key] = index; });
-      if (detected.operationDate !== undefined && detected.concept !== undefined && detected.amount !== undefined) { headerRow = rowIndex; mapping = detected; break; }
+      if (detected.operationDate !== undefined && detected.concept !== undefined && detected.amount !== undefined && detected.currency !== undefined) { headerRow = rowIndex; mapping = detected; break; }
     }
   } else headerRow = Number(explicitMapping.headerRow || 0);
-  if (!mapping || mapping.operationDate === undefined || mapping.concept === undefined || mapping.amount === undefined) {
+  if (!mapping || mapping.operationDate === undefined || mapping.concept === undefined || mapping.amount === undefined || mapping.currency === undefined) {
     let candidate = 0;
     for (let probe = 1; probe < Math.min(values.length, 30); probe += 1) if ((values[probe] || []).filter(function (value) { return String(value || '').trim(); }).length > (values[candidate] || []).filter(function (value) { return String(value || '').trim(); }).length) candidate = probe;
-    throw appError_('BANK_MAPPING_REQUIRED', 'No se reconoce el formato. Debes mapear fecha de operación, concepto e importe.', false, { headers: (values[candidate] || []).map(String), headerRow: candidate });
+    throw appError_('BANK_MAPPING_REQUIRED', 'No se reconoce el formato. Debes mapear fecha de operación, concepto, importe y moneda.', false, { headers: (values[candidate] || []).map(String), headerRow: candidate });
   }
   const rows = [];
   for (let index = headerRow + 1; index < values.length; index += 1) {
@@ -70,10 +72,11 @@ function normalizeBankRows_(values, explicitMapping) {
     const concept = String(row[mapping.concept] || '').trim();
     if (amount === null || !operationDate || !concept) continue;
     const valueDate = mapping.valueDate === undefined ? operationDate : (parseDate_(row[mapping.valueDate]) || operationDate);
-    const currency = mapping.currency === undefined ? 'EUR' : String(row[mapping.currency] || 'EUR').trim().toUpperCase();
+    const currency = String(row[mapping.currency] || '').trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(currency)) throw appError_('INVALID_BANK_CURRENCY', 'La fila ' + (index + 1) + ' contiene una moneda vacía o no válida. Corrige el archivo o el mapeo; no se asumirá EUR.');
     const referenceIndexes = Array.isArray(mapping.reference) ? mapping.reference : mapping.reference === undefined ? [] : [mapping.reference];
     const reference = referenceIndexes.map(function (column) { return String(row[column] || '').trim(); }).filter(Boolean).join(' · ');
-    rows.push({ operationDate: operationDate, valueDate: valueDate, concept: concept, amount: amount, currency: /^[A-Z]{3}$/.test(currency) ? currency : 'EUR', reference: reference, type: classifyBankMovement_(amount, concept) });
+    rows.push({ operationDate: operationDate, valueDate: valueDate, concept: concept, amount: amount, currency: currency, reference: reference, type: classifyBankMovement_(amount, concept) });
   }
   return { rows: rows, headerRow: headerRow };
 }

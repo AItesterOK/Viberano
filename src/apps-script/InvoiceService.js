@@ -2,6 +2,7 @@ function saveDocumentReview_(payload, user, requestId) {
   const input = payload.document || {};
   const row = getRows_(APP.SHEETS.DOCUMENTS).find(function (item) { return String(item.DOCUMENTO_ID) === String(input.id); });
   if (!row) throw appError_('DOCUMENT_NOT_FOUND', 'No se encuentra el documento.');
+  if (String(row.REQUEST_ID || '') === String(requestId)) return documentFromRow_(row);
   if (!String(payload.reason || '').trim()) throw appError_('REASON_REQUIRED', 'Toda corrección manual necesita un motivo.');
   const providers = activeProviders_();
   const provider = providers.find(function (item) { return item.id === input.supplierId; });
@@ -18,6 +19,22 @@ function saveDocumentReview_(payload, user, requestId) {
   const previous = documentFromRow_(row);
   updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, { FECHA_FACTURA: input.invoiceDate || '', PROVEEDOR: provider ? provider.name : input.supplier || '', PROVEEDOR_ID: provider ? provider.id : '', CIF_NIF: input.taxId || '', NUMERO_FACTURA: input.invoiceNumber || '', IMPORTE_TOTAL: input.total === null ? '' : Number(input.total), MONEDA: String(input.currency || '').toUpperCase(), FASE: phase, ESTADO_PROPUESTO: proposed, MOTIVO_REVISION: errors.length ? errors.join('; ') : String(payload.reason), EVIDENCIA_JSON: JSON.stringify((input.evidence || []).concat([{ field: 'manualDecision', value: proposed, source: 'MANUAL', excerpt: String(payload.reason) }])), SELECCIONADO: phase === 'LISTO PARA APROBAR', ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, REQUEST_ID: requestId });
   logEvent_('INFO', 'DOCUMENTO_REVISADO', input.id, String(payload.reason), { before: previous, after: input, validationErrors: errors }, String(row.LOTE_ID || ''), requestId, user);
+  return documentFromRow_(getRows_(APP.SHEETS.DOCUMENTS).find(function (item) { return item.__row === row.__row; }));
+}
+
+function approveDocument_(documentId, user, requestId) {
+  if (String(getConfigMap_().APP_MODE || 'DRY_RUN') !== 'PRODUCTION') throw appError_('DRY_RUN_ACTIVE', 'La aplicación está en modo seco. No se archivará ni registrará el documento.');
+  const row = getRows_(APP.SHEETS.DOCUMENTS).find(function (item) { return String(item.DOCUMENTO_ID) === String(documentId); });
+  if (!row) throw appError_('DOCUMENT_NOT_FOUND', 'No se encuentra el documento.');
+  if (String(row.FASE) === 'FINALIZADO') return documentFromRow_(row);
+  if (String(row.FASE) !== 'LISTO PARA APROBAR' && String(row.FASE) !== 'ERROR') throw appError_('DOCUMENT_NOT_READY', 'El documento todavía necesita revisión humana.');
+  try {
+    finalizeDocument_(row, user, requestId);
+    logEvent_('INFO', 'DOCUMENTO_APROBADO', documentId, 'Documento pendiente finalizado', {}, String(row.LOTE_ID || ''), requestId, user);
+  } catch (error) {
+    updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, { FASE: 'ERROR', ERROR: error.message || String(error), ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, REQUEST_ID: requestId });
+    throw error;
+  }
   return documentFromRow_(getRows_(APP.SHEETS.DOCUMENTS).find(function (item) { return item.__row === row.__row; }));
 }
 
@@ -57,7 +74,15 @@ function finalizeDocument_(row, user, requestId) {
   const sourceKey = String(row.SOURCE_KEY || '');
   const hash = String(row.HASH_PDF || '');
   const existingRows = getRows_(APP.SHEETS.INVOICES);
-  const duplicate = existingRows.find(function (invoice) { return String(invoice.ID_UNICO || '') === sourceKey || (hash && String(invoice.HASH_PDF || '') === hash); });
+  const sameSource = existingRows.find(function (invoice) { return String(invoice.ID_UNICO || '') === sourceKey; });
+  if (sameSource) {
+    updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, { FASE: 'FINALIZADO', ESTADO_FINAL: String(sameSource.ESTADO || 'DUPLICADO IGNORADO'), ARCHIVO_DRIVE: String(sameSource.ARCHIVO_DRIVE || ''), URL_DRIVE: String(sameSource.URL_DRIVE || ''), ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, ERROR: '' });
+    return;
+  }
+  const byteDuplicate = existingRows.find(function (invoice) { return hash && String(invoice.HASH_PDF || '') === hash; });
+  const accountingKey = status === 'PROCESADA' ? invoiceAccountingKey_(row) : '';
+  const accountingDuplicate = status === 'PROCESADA' ? existingRows.find(function (invoice) { return invoiceAccountingKey_(invoice) === accountingKey; }) : null;
+  const duplicate = byteDuplicate || accountingDuplicate;
   if (duplicate) {
     writeInvoiceRegister_(row, 'DUPLICADO IGNORADO', '', '', 'Coincidencia con ' + String(duplicate.ID_UNICO || ''), user);
     updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, { FASE: 'FINALIZADO', ESTADO_FINAL: 'DUPLICADO IGNORADO', ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user });

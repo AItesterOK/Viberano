@@ -75,7 +75,20 @@ export const api = {
     const errors = validateInvoice(document, mock.suppliers);
     const updated: InvoiceDocument = { ...document, reviewReason: reason || errors.join('; '), phase: errors.length ? 'EN REVISIÓN' : 'LISTO PARA APROBAR', proposedStatus: errors.length ? 'REVISIÓN MANUAL' : document.proposedStatus };
     mock.activeBatch = { ...mock.activeBatch!, documents: mock.activeBatch!.documents.map((item) => item.id === updated.id ? updated : item) };
+    mock.reviewDocuments = mock.reviewDocuments.map((item) => item.id === updated.id ? updated : item);
     return ok(structuredClone(updated));
+  },
+
+  async approveDocument(documentId: string): Promise<ApiResult<InvoiceDocument>> {
+    if (serverAvailable()) return callServer<InvoiceDocument>('apiApproveDocument', { documentId, requestId: requestId() });
+    await delay(500);
+    const document = mock.reviewDocuments.find((item) => item.id === documentId);
+    if (!document) return { ok: false, error: { code: 'DOCUMENT_NOT_FOUND', message: 'No se encuentra el documento' }, requestId: requestId() };
+    if (document.phase !== 'LISTO PARA APROBAR') return { ok: false, error: { code: 'DOCUMENT_NOT_READY', message: 'El documento todavía necesita revisión' }, requestId: requestId() };
+    const finalized = { ...document, phase: 'FINALIZADO' as const, finalStatus: document.proposedStatus };
+    mock.reviewDocuments = mock.reviewDocuments.filter((item) => item.id !== documentId);
+    if (mock.activeBatch) mock.activeBatch = { ...mock.activeBatch, documents: mock.activeBatch.documents.map((item) => item.id === documentId ? finalized : item) };
+    return ok(structuredClone(finalized));
   },
 
   async approveBatch(batchId: string, documentIds: string[]): Promise<ApiResult<Batch>> {
@@ -106,6 +119,18 @@ export const api = {
     if (serverAvailable()) return callServer<Supplier>('apiSetSupplierActive', { id, active, requestId: requestId() });
     const supplier = mock.suppliers.find((item) => item.id === id)!;
     return this.saveSupplier({ ...supplier, active });
+  },
+
+  async mergeSuppliers(sourceId: string, targetId: string, reason: string): Promise<ApiResult<{ source: Supplier; target: Supplier }>> {
+    if (serverAvailable()) return callServer('apiMergeSuppliers', { sourceId, targetId, reason, requestId: requestId() });
+    await delay();
+    const source = mock.suppliers.find((item) => item.id === sourceId);
+    const target = mock.suppliers.find((item) => item.id === targetId);
+    if (!source || !target || sourceId === targetId) return { ok: false, error: { code: 'INVALID_SUPPLIER_MERGE', message: 'Selecciona dos proveedores distintos' }, requestId: requestId() };
+    const mergedTarget = { ...target, aliases: [...new Set([...target.aliases, source.name, ...source.aliases])], evidence: `${target.evidence} | Fusión demo: ${reason}`, updatedAt: new Date().toISOString(), updatedBy: mock.settings.user };
+    const mergedSource = { ...source, active: false, updatedAt: new Date().toISOString(), updatedBy: mock.settings.user };
+    mock.suppliers = mock.suppliers.map((item) => item.id === sourceId ? mergedSource : item.id === targetId ? mergedTarget : item);
+    return ok({ source: structuredClone(mergedSource), target: structuredClone(mergedTarget) });
   },
 
   async previewBankImport(input: { fileName: string; base64: string; source: string; periodFrom: string; periodTo: string; coverage: string; mapping?: Record<string, number> }): Promise<ApiResult<BankImport>> {

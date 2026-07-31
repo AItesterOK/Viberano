@@ -28,6 +28,7 @@ Tras migrar, comprobar que los recuentos históricos siguen siendo idénticos. N
 
 - Volver a desplegar la versión Apps Script anterior.
 - Mantener las pestañas y columnas aditivas; no borrar registros de auditoría.
+- Fusionar proveedores solo con motivo acreditado: se desactiva el origen, se trasladan los documentos pendientes y no se reescribe el histórico.
 - Usar la copia previa de la hoja para comparar, no para sobrescribir silenciosamente producción.
 - Nunca borrar automáticamente facturas ya aprobadas.
 

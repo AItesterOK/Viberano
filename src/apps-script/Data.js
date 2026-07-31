@@ -118,6 +118,21 @@ function getActiveBatch_() {
   return rows.length ? batchFromRow_(rows[rows.length - 1]) : null;
 }
 
+function reviewDocuments_() {
+  const batchStates = getRows_(APP.SHEETS.BATCHES).reduce(function (map, row) { map[String(row.LOTE_ID || '')] = String(row.ESTADO || ''); return map; }, {});
+  return getRows_(APP.SHEETS.DOCUMENTS).filter(function (row) {
+    const phase = String(row.FASE || '');
+    const batchState = batchStates[String(row.LOTE_ID || '')] || '';
+    return phase === 'EN REVISIÓN' || phase === 'ERROR' || (phase === 'LISTO PARA APROBAR' && ['COMPLETADO', 'COMPLETADO CON ERRORES'].indexOf(batchState) !== -1);
+  }).map(documentFromRow_);
+}
+
+function eventByRequest_(requestId, actions) {
+  if (!requestId) return null;
+  actions = Array.isArray(actions) ? actions : [actions];
+  return getRows_(APP.SHEETS.LOG).find(function (row) { return String(row.ID_EVENTO || '') === String(requestId) && actions.indexOf(String(row['ACCIÓN'] || '')) !== -1; }) || null;
+}
+
 function uniqueRequestExists_(requestId) {
   if (!requestId) return false;
   return getRows_(APP.SHEETS.LOG).some(function (row) { return String(row.ID_EVENTO || '') === requestId; });

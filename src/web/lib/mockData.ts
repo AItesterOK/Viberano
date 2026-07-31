@@ -5,11 +5,11 @@ import { buildMonthlyMetrics } from './domain';
 const user = 'compras@reparapro.com';
 
 export const mockSuppliers: Supplier[] = [
-  { id: 'sup-norte', name: 'Proveedor Demo Norte SL', domain: 'demo-norte.invalid', taxId: 'B00000001', aliases: ['Demo Norte'], active: true, evidence: 'Evidencia sintética de demostración', updatedAt: '2026-07-21T09:10:00Z', updatedBy: user, invoiceCount: 18 },
-  { id: 'sup-europa', name: 'Componentes Demo Europa BV', domain: 'demo-europa.invalid', taxId: 'NL000000002B01', aliases: ['Demo Europa'], active: true, evidence: 'Evidencia sintética de demostración', updatedAt: '2026-07-21T09:12:00Z', updatedBy: user, invoiceCount: 34 },
-  { id: 'sup-taller', name: 'Suministros Taller Demo SL', domain: '', taxId: 'B00000003', aliases: ['Taller Demo'], active: true, evidence: 'Evidencia sintética de demostración', updatedAt: '2026-07-21T09:13:00Z', updatedBy: user, invoiceCount: 26 },
-  { id: 'sup-logistica', name: 'Logística Demo SL', domain: 'logistica-demo.invalid', taxId: 'B00000004', aliases: ['Demo Logística'], active: true, evidence: 'Evidencia sintética de demostración', updatedAt: '2026-07-21T09:14:00Z', updatedBy: user, invoiceCount: 11 },
-  { id: 'sup-servicios', name: 'Servicios Cloud Demo Ltd', domain: 'cloud-demo.invalid', taxId: '', aliases: ['Cloud Demo'], active: true, evidence: 'Razón social sintética', updatedAt: '2026-07-21T09:15:00Z', updatedBy: user, invoiceCount: 7 },
+  { id: 'sup-norte', name: 'Proveedor Demo Norte SL', domain: 'demo-norte.invalid', taxId: 'B00000001', aliases: ['Demo Norte'], active: true, evidence: 'Evidencia sintética de demostración', updatedAt: '2026-07-21T09:10:00Z', updatedBy: user, invoiceCount: 3 },
+  { id: 'sup-europa', name: 'Componentes Demo Europa BV', domain: 'demo-europa.invalid', taxId: 'NL000000002B01', aliases: ['Demo Europa'], active: true, evidence: 'Evidencia sintética de demostración', updatedAt: '2026-07-21T09:12:00Z', updatedBy: user, invoiceCount: 5 },
+  { id: 'sup-taller', name: 'Suministros Taller Demo SL', domain: '', taxId: 'B00000003', aliases: ['Taller Demo'], active: true, evidence: 'Evidencia sintética de demostración', updatedAt: '2026-07-21T09:13:00Z', updatedBy: user, invoiceCount: 4 },
+  { id: 'sup-logistica', name: 'Logística Demo SL', domain: 'logistica-demo.invalid', taxId: 'B00000004', aliases: ['Demo Logística'], active: true, evidence: 'Evidencia sintética de demostración', updatedAt: '2026-07-21T09:14:00Z', updatedBy: user, invoiceCount: 2 },
+  { id: 'sup-servicios', name: 'Servicios Cloud Demo Ltd', domain: 'cloud-demo.invalid', taxId: '', aliases: ['Cloud Demo'], active: true, evidence: 'Razón social sintética', updatedAt: '2026-07-21T09:15:00Z', updatedBy: user, invoiceCount: 1 },
   { id: 'sup-old', name: 'Proveedor histórico demo inactivo', domain: '', taxId: '', aliases: [], active: false, evidence: 'Desactivado en el escenario sintético', updatedAt: '2026-07-30T10:00:00Z', updatedBy: user, invoiceCount: 1 },
 ];
 
@@ -71,13 +71,14 @@ export function createMockSnapshot(): AppSnapshot {
   return {
     settings: { mode: 'DRY_RUN', user, effectiveUser: user, allowedUsers: [user], timezone: 'Europe/Madrid', spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: 20, sliceSize: 5, startDate: '2026-01-01', services: { gmail: true, drive: true, sheets: true } },
     activeBatch: mockBatch,
+    reviewDocuments: [reviewDocument],
     invoices: mockInvoices,
     suppliers: mockSuppliers,
     metrics,
     bankImports: [mockBankImport],
     audit: mockAudit,
-    reviewCount: 44,
-    processedCount: 177,
-    duplicateCount: 45,
+    reviewCount: 1,
+    processedCount: 7,
+    duplicateCount: 2,
   };
 }
