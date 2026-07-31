@@ -20,7 +20,7 @@ Tras migrar, comprobar que los recuentos históricos siguen siendo idénticos. N
 2. Analizar exactamente 10 correos posteriores al último punto de control.
 3. Revisar proveedor, tipo, fecha, importe, número, decisión, carpeta y nombre final.
 4. Confirmar que no hay PDF nuevo en `A.2 - FA-GASTOS` ni fila definitiva nueva en `FACTURAS`.
-5. Solo después de la aprobación humana, cambiar a `PRODUCTION` y aprobar la selección.
+5. Solo después de la aprobación humana, cambiar a `PRODUCTION`, marcar la confirmación separada de que el piloto fue revisado y aprobar la selección.
 6. Verificar los enlaces, estados y hashes.
 7. Repetir la petición con el mismo request ID o volver a presentar el documento: no debe crearse una segunda copia.
 

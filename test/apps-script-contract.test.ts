@@ -88,4 +88,10 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(core).toContain("'QUOTA_LIMIT'");
     expect(core).toContain('conservando el punto de continuación');
   });
+
+  it('exige confirmación separada para activar producción', () => {
+    const api = source('Api.js');
+    expect(api).toContain("payload.confirmation || '') !== 'ACTIVAR_PRODUCCION'");
+    expect(api).toContain("appError_('PRODUCTION_CONFIRMATION_REQUIRED'");
+  });
 });

@@ -39,14 +39,11 @@ function approveDocument_(documentId, user, requestId) {
 }
 
 function approveBatch_(payload, user, requestId) {
-  if (uniqueRequestExists_(requestId)) {
-    const prior = getRows_(APP.SHEETS.BATCHES).find(function (row) { return String(row.LOTE_ID) === String(payload.batchId); });
-    return batchFromRow_(prior);
-  }
   const config = getConfigMap_();
   if (String(config.APP_MODE || 'DRY_RUN') !== 'PRODUCTION') throw appError_('DRY_RUN_ACTIVE', 'La aplicación está en modo seco. Cambia a PRODUCCIÓN de forma explícita antes de aprobar.');
   const batchRow = getRows_(APP.SHEETS.BATCHES).find(function (row) { return String(row.LOTE_ID) === String(payload.batchId); });
   if (!batchRow) throw appError_('BATCH_NOT_FOUND', 'No se encuentra el lote.');
+  if (String(batchRow.REQUEST_ID || '') === String(requestId) && ['COMPLETADO', 'COMPLETADO CON ERRORES'].indexOf(String(batchRow.ESTADO || '')) !== -1) return batchFromRow_(batchRow);
   if (String(batchRow.ESTADO) === 'COMPLETADO') return batchFromRow_(batchRow);
   const ids = payload.documentIds || [];
   if (!ids.length) throw appError_('EMPTY_APPROVAL', 'Selecciona al menos un documento.');

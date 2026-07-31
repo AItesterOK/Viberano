@@ -127,6 +127,8 @@ function confirmBankImport_(importId, user, requestId) {
 }
 
 function decideReconciliation_(payload, user, requestId) {
+  const repeatedEvent = eventByRequest_(requestId, 'CONCILIACION_DECIDIDA');
+  if (repeatedEvent) { const repeatedData = safeJsonParse_(repeatedEvent.DATOS_JSON, {}); const repeatedMovement = safeRows_(APP.SHEETS.MOVEMENTS).find(function (row) { return String(row.MOVIMIENTO_ID || '') === String(repeatedEvent.DOCUMENTO || ''); }); return bankImportById_(String(repeatedMovement && repeatedMovement.IMPORT_ID || payload.importId || repeatedData.importId || '')); }
   const allowed = ['COINCIDENCIA CONFIRMADA', 'REVISIÓN MANUAL', 'CANDIDATA PENDIENTE', 'MOVIMIENTO SIN FACTURA'];
   if (allowed.indexOf(String(payload.status)) === -1) throw appError_('INVALID_RECONCILIATION_STATUS', 'Estado de conciliación no permitido.');
   const movement = safeRows_(APP.SHEETS.MOVEMENTS).find(function (row) { return String(row.MOVIMIENTO_ID) === String(payload.movementId) && String(row.IMPORT_ID) === String(payload.importId); });
@@ -136,7 +138,7 @@ function decideReconciliation_(payload, user, requestId) {
   const reconciliation = safeRows_(APP.SHEETS.RECONCILIATIONS).find(function (row) { return String(row.MOVIMIENTO_ID) === String(payload.movementId); });
   if (reconciliation) updateObjectRow_(APP.SHEETS.RECONCILIATIONS, reconciliation.__row, { ESTADO: payload.status === 'COINCIDENCIA CONFIRMADA' ? 'CONFIRMADA' : payload.status, DECISION: payload.status, MOTIVO: payload.reason || '', DECIDIDO_EN: nowIso_(), DECIDIDO_POR: user, REQUEST_ID: requestId });
   else appendObject_(APP.SHEETS.RECONCILIATIONS, { CONCILIACION_ID: 'REC-' + uuid_(), IMPORT_ID: payload.importId, MOVIMIENTO_ID: payload.movementId, FACTURA_ID: payload.invoiceId || '', ESTADO: payload.status === 'COINCIDENCIA CONFIRMADA' ? 'CONFIRMADA' : payload.status, EVIDENCIA: movement.EVIDENCIA || '', DECISION: payload.status, MOTIVO: payload.reason || '', CREADO_EN: nowIso_(), CREADO_POR: user, DECIDIDO_EN: nowIso_(), DECIDIDO_POR: user, REQUEST_ID: requestId });
-  logEvent_('INFO', 'CONCILIACION_DECIDIDA', payload.movementId, before + ' → ' + payload.status, { invoiceId: payload.invoiceId || '' }, '', requestId, user);
+  logEvent_('INFO', 'CONCILIACION_DECIDIDA', payload.movementId, before + ' → ' + payload.status, { invoiceId: payload.invoiceId || '', importId: payload.importId }, '', requestId, user);
   return bankImportById_(payload.importId);
 }
 

@@ -96,6 +96,8 @@ function apiMergeSuppliers(payload) {
 
 function apiUpdateSettings(payload) {
   return withApi_(payload, function (user, requestId) {
+    const repeatedEvent = eventByRequest_(requestId, 'CONFIG_ACTUALIZADA');
+    if (repeatedEvent) { const current = getConfigMap_(); return settingsResponse_(current, user); }
     const input = payload.settings || {};
     const mode = String(input.mode || 'DRY_RUN');
     if (['DRY_RUN', 'PRODUCTION'].indexOf(mode) === -1) throw appError_('INVALID_MODE', 'Modo no válido.');
@@ -104,14 +106,19 @@ function apiUpdateSettings(payload) {
     const max = Math.min(Math.max(Number(input.maxBatchSize || 10), 1), APP.MAX_BATCH_SIZE);
     const slice = Math.min(Math.max(Number(input.sliceSize || APP.SLICE_SIZE), 1), APP.SLICE_SIZE);
     const before = getConfigMap_();
+    if (mode === 'PRODUCTION' && String(before.APP_MODE || 'DRY_RUN') !== 'PRODUCTION' && String(payload.confirmation || '') !== 'ACTIVAR_PRODUCCION') throw appError_('PRODUCTION_CONFIRMATION_REQUIRED', 'Debes confirmar explícitamente la activación de producción.');
     upsertConfig_('APP_MODE', mode, 'DRY_RUN impide archivo y registro definitivo');
     upsertConfig_('APP_ALLOWED_USERS', allowed.join(','), 'Correos autorizados separados por coma');
     upsertConfig_('APP_MAX_BATCH_SIZE', String(max), 'Máximo de correos por lote');
     upsertConfig_('APP_SLICE_SIZE', String(slice), 'Correos por ejecución interna');
     upsertConfig_('APP_START_DATE', parseDate_(input.startDate) || APP.START_DATE, 'Inicio mínimo de búsqueda en Gmail');
     logEvent_('INFO', 'CONFIG_ACTUALIZADA', 'CONFIG', 'Configuración operativa actualizada', { before: before, after: getConfigMap_() }, '', requestId, user);
-    return { mode: mode, user: user, effectiveUser: getEffectiveEmail_(), allowedUsers: allowed, timezone: APP.TIMEZONE, spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: max, sliceSize: slice, startDate: parseDate_(input.startDate) || APP.START_DATE, services: { gmail: true, drive: true, sheets: true }, schemaReady: true };
+    return settingsResponse_(getConfigMap_(), user);
   }, { lock: true });
+}
+
+function settingsResponse_(config, user) {
+  return { mode: String(config.APP_MODE || 'DRY_RUN'), user: user, effectiveUser: getEffectiveEmail_(), allowedUsers: String(config.APP_ALLOWED_USERS || APP.OWNER_EMAIL).split(/[;,\s]+/).filter(Boolean), timezone: String(config.APP_TIMEZONE || APP.TIMEZONE), spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), sliceSize: Number(config.APP_SLICE_SIZE || APP.SLICE_SIZE), startDate: String(config.APP_START_DATE || APP.START_DATE), services: { gmail: true, drive: true, sheets: true }, schemaReady: true };
 }
 
 function buildMetrics_(invoices) {

@@ -52,3 +52,19 @@ test('fusiona proveedores de forma reversible sin borrar el histórico', async (
   await expect(page.getByRole('dialog', { name: 'Fusionar proveedores' })).toHaveCount(0);
   await expect(page.getByText(/También:.*Logística Demo SL/)).toBeVisible();
 });
+
+test('no activa producción sin una confirmación separada', async ({ page }) => {
+  await page.goto('/');
+  if ((page.viewportSize()?.width ?? 1200) < 860) {
+    await page.getByRole('button', { name: /Más/ }).click();
+    await page.getByRole('button', { name: 'Configuración' }).last().click();
+  } else {
+    await page.getByRole('button', { name: 'Configuración' }).first().click();
+  }
+  await page.getByLabel('Modo').selectOption('PRODUCTION');
+  await page.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Confirma de forma explícita la activación de producción.')).toBeVisible();
+  await page.getByText('Confirmo que el piloto en modo seco ha sido revisado y autorizo escrituras definitivas').click();
+  await page.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByRole('button', { name: 'Guardado' })).toBeVisible();
+});

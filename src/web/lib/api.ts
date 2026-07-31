@@ -162,8 +162,8 @@ export const api = {
     return ok(structuredClone(bankImport));
   },
 
-  async updateSettings(settings: AppSnapshot['settings']): Promise<ApiResult<AppSnapshot['settings']>> {
-    if (serverAvailable()) return callServer('apiUpdateSettings', { settings, requestId: requestId() });
+  async updateSettings(settings: AppSnapshot['settings'], confirmProduction = false): Promise<ApiResult<AppSnapshot['settings']>> {
+    if (serverAvailable()) return callServer('apiUpdateSettings', { settings, confirmation: confirmProduction ? 'ACTIVAR_PRODUCCION' : '', requestId: requestId() });
     mock.settings = settings;
     return ok(structuredClone(settings));
   },

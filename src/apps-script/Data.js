@@ -65,6 +65,12 @@ function upsertConfig_(key, value, description) {
 }
 
 function setupSchema_(user, requestId) {
+  const repeatedEvent = eventByRequest_(requestId, 'SCHEMA_MIGRATED');
+  if (repeatedEvent) {
+    const repeatedData = safeJsonParse_(repeatedEvent.DATOS_JSON, {});
+    const repeatedBackup = Drive.Files.get(String(repeatedData.backupId || ''), { fields: 'id,name,webViewLink' });
+    return { backup: { id: repeatedBackup.id, name: repeatedBackup.name, url: repeatedBackup.webViewLink || ('https://docs.google.com/spreadsheets/d/' + repeatedBackup.id) }, report: repeatedData.report || [] };
+  }
   const stamp = Utilities.formatDate(new Date(), APP.TIMEZONE, 'yyyy-MM-dd HHmmss');
   const backup = Drive.Files.copy({ name: 'ReparaPRO Docs - Copia previa app - ' + stamp }, APP.SPREADSHEET_ID, { fields: 'id,name,webViewLink' });
   const report = [];
