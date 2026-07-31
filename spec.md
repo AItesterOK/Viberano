@@ -258,8 +258,11 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 - **FR-029**: El sistema DEBE distinguir una factura no encontrada en los extractos aportados de una factura impagada.
 - **FR-030**: El sistema DEBE identificar los cargos bancarios relevantes para los que no exista una factura registrada.
 - **FR-031**: El reporte de conciliación DEBE indicar el periodo y las fuentes bancarias consideradas.
-- **FR-032**: El sistema DEBE mantener en revisión las notas de crédito y los abonos hasta que exista una regla contable aprobada. **[NECESITA ACLARACIÓN: qué estados, datos y reglas de archivo deben aplicarse a notas de crédito, abonos y facturas rectificativas]**
-- **FR-033**: El sistema DEBE resolver conciliaciones de un pago contra varias facturas o de varios pagos contra una factura. **[NECESITA ACLARACIÓN: deben incluirse estas conciliaciones en esta feature o tratarse en una especificación posterior]**
+- **FR-032**: El sistema DEBE detectar notas de crédito, abonos y facturas rectificativas, mantenerlas en `REVISIÓN MANUAL` y evitar su archivo o conciliación automática en esta primera versión.
+- **FR-033**: El sistema DEBE detectar posibles conciliaciones de un pago contra varias facturas o de varios pagos contra una factura, mostrarlas como `REVISIÓN MANUAL` y evitar su confirmación automática en esta primera versión.
+- **FR-034**: El sistema DEBE iniciar el procesamiento únicamente por una acción expresa de una persona autorizada y no mediante ejecuciones programadas.
+- **FR-035**: El sistema DEBE exigir una identidad autorizada antes de mostrar datos o permitir acciones, atribuyendo cada decisión a la persona identificada.
+- **FR-036**: El sistema DEBE permitir utilizar la aplicación desde navegadores de escritorio y móvil con conexión a Internet, sin depender de un modo sin conexión.
 
 ### Entidades clave
 
@@ -303,10 +306,14 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 - La ausencia de un movimiento coincidente solo describe lo observado en las fuentes bancarias aportadas.
 - Los extractos bancarios pueden no cubrir todas las cuentas, tarjetas, efectivo o fechas de pago utilizadas por la empresa.
 - Las facturas históricas de un proveedor se conservan aunque ese proveedor deje de utilizarse.
+- La primera versión funciona exclusivamente en línea, se inicia manualmente y no utiliza servicios de inteligencia documental de pago.
+- Todas las personas autorizadas disponen de las mismas capacidades y cada acción queda atribuida.
+- La cuenta inicialmente autorizada es `compras@reparapro.com`; las incorporaciones posteriores requieren validación explícita.
 - El histórico validado hasta el 20 de julio de 2026 sirve como línea base de aceptación: 474 documentos registrados, de los que 177 constaban como procesados, 208 como no factura, 45 como duplicados ignorados y 44 como revisión manual.
 - La ejecución histórica archivó 159 facturas aprobadas sin errores de subida, duplicados creados ni enlaces ausentes.
 
-## Aclaraciones pendientes
+## Decisiones cerradas para la primera versión
 
-1. **Tratamiento de documentos rectificativos**: definir cómo se validan, archivan, contabilizan y concilian las notas de crédito, los abonos y las facturas rectificativas.
-2. **Conciliaciones múltiples**: confirmar si esta primera feature debe admitir varios pagos para una factura y pagos agrupados para varias facturas, o si se especificará por separado.
+1. **Documentos rectificativos**: las notas de crédito, los abonos y las facturas rectificativas se detectan y permanecen en revisión manual; no se archivan ni concilian automáticamente.
+2. **Conciliaciones múltiples**: las relaciones uno-a-varios y varios-a-uno se señalan para revisión, pero solo se pueden confirmar coincidencias inequívocas uno-a-uno.
+3. **Operación**: no existen tareas programadas ni aprobaciones automáticas; una persona autorizada inicia el análisis y confirma cada escritura definitiva.
