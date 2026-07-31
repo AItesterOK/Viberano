@@ -104,7 +104,7 @@ function documentFromRow_(row) {
 }
 
 function invoiceFromRow_(row) {
-  return { id: String(row.ID_UNICO || ('invoice-row-' + row.__row)), date: String(row.FECHA_FACTURA || ''), supplier: String(row.PROVEEDOR || ''), taxId: String(row.CIF_NIF || ''), number: String(row['NÚMERO_FACTURA'] || ''), total: Number(row.IMPORTE_TOTAL || 0), currency: String(row.MONEDA || 'EUR'), status: String(row.ESTADO || ''), driveUrl: String(row.URL_DRIVE || ''), gmailUrl: String(row.REFERENCIA_CORREO || ''), originalName: String(row.NOMBRE_ORIGINAL || ''), batchId: String(row.LOTE_ID || ''), hash: String(row.HASH_PDF || ''), __row: row.__row };
+  return { id: String(row.ID_UNICO || ('invoice-row-' + row.__row)), date: String(row.FECHA_FACTURA || ''), supplier: String(row.PROVEEDOR || ''), taxId: String(row.CIF_NIF || ''), number: String(row['NÚMERO_FACTURA'] || ''), total: Number(row.IMPORTE_TOTAL || 0), currency: String(row.MONEDA || ''), status: String(row.ESTADO || ''), driveUrl: String(row.URL_DRIVE || ''), gmailUrl: String(row.REFERENCIA_CORREO || ''), originalName: String(row.NOMBRE_ORIGINAL || ''), batchId: String(row.LOTE_ID || ''), hash: String(row.HASH_PDF || ''), __row: row.__row };
 }
 
 function batchFromRow_(row) {

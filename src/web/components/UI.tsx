@@ -44,6 +44,7 @@ export function EvidenceChain({ active = 3 }: { active?: number }) {
 }
 
 export function formatCurrency(value: number, currency = 'EUR') {
+  if (!/^[A-Z]{3}$/.test(currency)) return new Intl.NumberFormat('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value) + ' · moneda no acreditada';
   return new Intl.NumberFormat('es-ES', { style: 'currency', currency }).format(value);
 }
 

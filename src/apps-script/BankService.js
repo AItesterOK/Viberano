@@ -141,7 +141,7 @@ function decideReconciliation_(payload, user, requestId) {
 }
 
 function movementFromRow_(row) {
-  return { id: String(row.MOVIMIENTO_ID || ''), importId: String(row.IMPORT_ID || ''), operationDate: String(row.FECHA_OPERACION || ''), valueDate: String(row.FECHA_VALOR || ''), concept: String(row.CONCEPTO || ''), amount: Number(row.IMPORTE || 0), currency: String(row.MONEDA || 'EUR'), reference: String(row.REFERENCIA || ''), type: String(row.TIPO || 'REVISIÓN'), status: String(row.ESTADO_CONCILIACION || 'REVISIÓN MANUAL'), candidateInvoiceId: String(row.FACTURA_CANDIDATA_ID || '') || undefined, evidence: String(row.EVIDENCIA || '') || undefined };
+  return { id: String(row.MOVIMIENTO_ID || ''), importId: String(row.IMPORT_ID || ''), operationDate: String(row.FECHA_OPERACION || ''), valueDate: String(row.FECHA_VALOR || ''), concept: String(row.CONCEPTO || ''), amount: Number(row.IMPORTE || 0), currency: String(row.MONEDA || ''), reference: String(row.REFERENCIA || ''), type: String(row.TIPO || 'REVISIÓN'), status: String(row.ESTADO_CONCILIACION || 'REVISIÓN MANUAL'), candidateInvoiceId: String(row.FACTURA_CANDIDATA_ID || '') || undefined, evidence: String(row.EVIDENCIA || '') || undefined };
 }
 
 function bankImportById_(importId) {

@@ -105,7 +105,7 @@ function analyzeAttachment_(batchId, messageId, attachment, metadata, sourceKey,
   let decision;
   try {
     extracted = ocrPdf_(bytes, attachment.filename);
-    decision = duplicate ? { status: 'DUPLICADO IGNORADO', phase: 'LISTO PARA APROBAR', reason: 'La huella SHA-256 ya existe en el registro', fields: {}, evidence: [{ field: 'duplicate', value: hash, source: 'PDF', excerpt: 'Coincidencia exacta de bytes' }] } : classifyInvoiceText_(extracted.text, metadata.sender);
+    decision = duplicate ? { status: 'DUPLICADO IGNORADO', phase: 'LISTO PARA APROBAR', reason: 'La huella SHA-256 ya existe en el registro', fields: {}, evidence: [{ field: 'duplicate', value: hash, source: 'PDF', excerpt: 'Coincidencia exacta de bytes' }] } : classifyInvoiceText_(extracted.text, metadata.sender, metadata.subject);
   } catch (error) {
     decision = { status: 'REVISIÓN MANUAL', phase: 'EN REVISIÓN', reason: 'No se pudo extraer texto fiable: ' + (error.message || error), fields: {}, evidence: [] };
   } finally {
@@ -115,7 +115,7 @@ function analyzeAttachment_(batchId, messageId, attachment, metadata, sourceKey,
   const id = 'DOC-' + uuid_();
   appendObject_(APP.SHEETS.DOCUMENTS, {
     DOCUMENTO_ID: id, LOTE_ID: batchId, MESSAGE_ID: messageId, ATTACHMENT_ID: attachment.attachmentId, SOURCE_KEY: sourceKey, NOMBRE_ORIGINAL: attachment.filename,
-    REMITENTE: metadata.sender, ASUNTO: metadata.subject, FECHA_CORREO: metadata.date, FECHA_FACTURA: fields.invoiceDate || '', PROVEEDOR: fields.supplier || '', PROVEEDOR_ID: fields.supplierId || '', CIF_NIF: fields.taxId || '', NUMERO_FACTURA: fields.invoiceNumber || '', IMPORTE_TOTAL: fields.total === undefined || fields.total === null ? '' : fields.total, MONEDA: fields.currency || 'EUR', FASE: decision.phase, ESTADO_PROPUESTO: decision.status, ESTADO_FINAL: '', MOTIVO_REVISION: decision.reason || '', EVIDENCIA_JSON: JSON.stringify(decision.evidence || []), HASH_PDF: hash, GMAIL_URL: metadata.gmailUrl, SELECCIONADO: decision.phase === 'LISTO PARA APROBAR', ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, ERROR: '', REQUEST_ID: requestId,
+    REMITENTE: metadata.sender, ASUNTO: metadata.subject, FECHA_CORREO: metadata.date, FECHA_FACTURA: fields.invoiceDate || '', PROVEEDOR: fields.supplier || '', PROVEEDOR_ID: fields.supplierId || '', CIF_NIF: fields.taxId || '', NUMERO_FACTURA: fields.invoiceNumber || '', IMPORTE_TOTAL: fields.total === undefined || fields.total === null ? '' : fields.total, MONEDA: fields.currency || '', FASE: decision.phase, ESTADO_PROPUESTO: decision.status, ESTADO_FINAL: '', MOTIVO_REVISION: decision.reason || '', EVIDENCIA_JSON: JSON.stringify(decision.evidence || []), HASH_PDF: hash, GMAIL_URL: metadata.gmailUrl, SELECCIONADO: decision.phase === 'LISTO PARA APROBAR', ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, ERROR: '', REQUEST_ID: requestId,
   });
   logEvent_('INFO', 'DOCUMENTO_ANALIZADO', id, attachment.filename, { status: decision.status, hash: hash }, batchId, requestId, user);
 }
@@ -128,11 +128,11 @@ function ocrPdf_(bytes, fileName) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try { text = DocumentApp.openById(created.id).getBody().getText(); if (text) break; } catch (error) { lastError = error; Utilities.sleep(Math.pow(2, attempt) * 900); }
   }
-  if (!text && lastError) throw lastError;
+  if (!text && lastError) { try { DriveApp.getFileById(created.id).setTrashed(true); } catch (_) {} throw lastError; }
   return { text: text, tempId: created.id };
 }
 
-function classifyInvoiceText_(text, sender) {
+function classifyInvoiceText_(text, sender, subject) {
   const normalized = normalizeText_(text);
   const evidence = [];
   const negative = ['presupuesto', 'propuesta comercial', 'propuesta de servicio', 'albaran', 'nota de entrega', 'shipment slip', 'confirmacion de pedido', 'etiqueta de devolucion'];
@@ -142,30 +142,59 @@ function classifyInvoiceText_(text, sender) {
   if (negativeHits.length && signalHits.length < 3) return { status: 'NO ES FACTURA', phase: 'LISTO PARA APROBAR', reason: 'El contenido identifica ' + negativeHits[0], fields: {}, evidence: [{ field: 'classification', value: 'NO ES FACTURA', source: 'PDF', excerpt: negativeHits.join(', ') }] };
   if ((normalized.indexOf('reparapro sociedad limitada') !== -1 || normalized.indexOf('reparapro iphone mac ipad') !== -1) && /factura|invoice/.test(normalized)) return { status: 'FACTURA DE VENTA', phase: 'LISTO PARA APROBAR', reason: 'Documento emitido por ReparaPRO', fields: {}, evidence: [{ field: 'issuer', value: 'ReparaPRO', source: 'PDF', excerpt: 'Emisor identificado como ReparaPRO' }] };
   if (signalHits.length < 3) return { status: 'REVISIÓN MANUAL', phase: 'EN REVISIÓN', reason: 'No hay señales suficientes para identificar una factura', fields: {}, evidence: [{ field: 'classification', value: signalHits.join(', '), source: 'PDF', excerpt: 'Señales detectadas insuficientes' }] };
-  const complex = ['factura rectificativa', 'credit note', 'nota de credito', 'abono'].find(function (term) { return normalized.indexOf(term) !== -1; });
+  const complex = ['factura rectificativa', 'rectificativa', 'credit note', 'nota de credito', 'abono', 'corrective invoice'].find(function (term) { return normalized.indexOf(term) !== -1; });
   const providers = activeProviders_();
   const domainMatch = String(sender || '').toLowerCase().match(/@([a-z0-9.-]+)/);
   const senderDomain = domainMatch ? domainMatch[1].replace(/[>\s].*$/, '') : '';
-  const provider = providers.find(function (item) {
+  const ruleMatch = providerFromRules_(text, sender, subject, providers);
+  const provider = ruleMatch ? ruleMatch.provider : providers.find(function (item) {
     const names = [item.name].concat(item.aliases || []).map(normalizeText_).filter(Boolean);
     return (item.domain && senderDomain && senderDomain.endsWith(item.domain.toLowerCase())) || names.some(function (name) { return name.length > 3 && normalized.indexOf(name) !== -1; }) || (item.taxId && normalized.indexOf(normalizeText_(item.taxId)) !== -1);
   });
-  const numberMatch = text.match(/(?:invoice\s*(?:number|no\.?|#)|n[uú]mero\s+de\s+factura|factura\s*(?:n[ºo°.]|#))\s*[:#-]?\s*([A-Z0-9][A-Z0-9\/_-]{2,})/i);
+  const numberPattern = /(?:invoice\s*(?:number|no\.?|#)|n[uú]mero\s+de\s+factura|factura\s*(?:n[ºo°.]|#))\s*[:#-]?\s*([A-Z0-9][A-Z0-9\/_-]{2,})/gi;
+  const numberMatches = Array.from(text.matchAll(numberPattern));
+  const numberMatch = numberMatches.length ? numberMatches[0] : null;
+  const distinctNumbers = numberMatches.map(function (match) { return normalizeText_(match[1]); }).filter(function (value, index, list) { return value && list.indexOf(value) === index; });
   const dateMatch = text.match(/(?:fecha(?:\s+de\s+emisi[oó]n)?|invoice\s+date|date)\s*[:#-]?\s*(20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]20\d{2})/i);
   const totalMatches = Array.from(text.matchAll(/(?:grand\s+total|importe\s+total|total\s+(?:a\s+pagar|factura)|amount\s+due)\s*[:€$]?\s*([\d.,]+)\s*(EUR|USD|GBP|€|\$)?/gi));
   const totalMatch = totalMatches.length ? totalMatches[totalMatches.length - 1] : null;
   const total = totalMatch ? parseNumber_(totalMatch[1]) : null;
-  const currency = totalMatch && totalMatch[2] ? ({ '€': 'EUR', '$': 'USD' }[totalMatch[2]] || totalMatch[2].toUpperCase()) : (/\bUSD\b/.test(text) ? 'USD' : /\bGBP\b/.test(text) ? 'GBP' : 'EUR');
+  const explicitCurrency = text.match(/\b(EUR|USD|GBP|CHF|PLN|CAD|AUD)\b/i);
+  const totalToken = totalMatch && totalMatch[2] ? totalMatch[2] : '';
+  const currency = totalToken === '€' ? 'EUR' : /^[A-Z]{3}$/i.test(totalToken) ? totalToken.toUpperCase() : explicitCurrency ? explicitCurrency[1].toUpperCase() : '';
   const fields = { supplier: provider ? provider.name : '', supplierId: provider ? provider.id : '', taxId: provider ? provider.taxId : '', invoiceNumber: numberMatch ? numberMatch[1] : '', invoiceDate: dateMatch ? parseDate_(dateMatch[1]) : '', total: total, currency: currency };
-  if (provider) evidence.push({ field: 'supplier', value: provider.name, source: provider.domain && senderDomain.endsWith(provider.domain) ? 'CORREO' : 'PDF', excerpt: provider.domain && senderDomain.endsWith(provider.domain) ? senderDomain : provider.name });
+  if (provider) evidence.push({ field: 'supplier', value: provider.name, source: ruleMatch ? 'REGLA' : provider.domain && senderDomain.endsWith(provider.domain) ? 'CORREO' : 'PDF', excerpt: ruleMatch ? ruleMatch.evidence : provider.domain && senderDomain.endsWith(provider.domain) ? senderDomain : provider.name });
   if (fields.invoiceNumber) evidence.push({ field: 'invoiceNumber', value: fields.invoiceNumber, source: 'PDF', excerpt: numberMatch[0] });
   if (fields.invoiceDate) evidence.push({ field: 'invoiceDate', value: fields.invoiceDate, source: 'PDF', excerpt: dateMatch[0] });
   if (total !== null) evidence.push({ field: 'total', value: total + ' ' + currency, source: 'PDF', excerpt: totalMatch[0] });
   const errors = [];
   if (complex) errors.push('Documento ' + complex + ': tratamiento contable pendiente');
+  if (distinctNumbers.length > 1) errors.push('El PDF contiene varias facturas o números de factura distintos');
   if (!provider) errors.push('Proveedor desconocido o inactivo' + (senderDomain ? ' (' + senderDomain + ')' : ''));
   if (!fields.invoiceNumber) errors.push('Número de factura ausente o ambiguo');
   if (!fields.invoiceDate) errors.push('Fecha de emisión ausente o inválida');
   if (total === null || total <= 0) errors.push('Importe total ausente o inválido');
+  if (!currency) errors.push('Moneda ausente o ambigua');
   return { status: errors.length ? 'REVISIÓN MANUAL' : 'PROCESADA', phase: errors.length ? 'EN REVISIÓN' : 'LISTO PARA APROBAR', reason: errors.join('; '), fields: fields, evidence: evidence };
+}
+
+function providerFromRules_(text, sender, subject, providers) {
+  const rows = getRows_(APP.SHEETS.RULES).filter(function (row) { return toBoolean_(row.ACTIVA); }).sort(function (a, b) { return Number(b.PRIORIDAD || 0) - Number(a.PRIORIDAD || 0); });
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const field = normalizeText_(row.CAMPO || 'pdf');
+    const pattern = String(row['TEXTO_O_PATRÓN'] || '').trim();
+    if (!pattern) continue;
+    const haystack = /dominio|remitente|correo/.test(field) ? String(sender || '') : /asunto/.test(field) ? String(subject || '') : String(text || '');
+    let matches = false;
+    try {
+      const delimited = pattern.match(/^\/(.*)\/([gimsuy]*)$/);
+      matches = delimited ? new RegExp(delimited[1], delimited[2].replace(/g/g, '')).test(haystack) : normalizeText_(haystack).indexOf(normalizeText_(pattern)) !== -1;
+    } catch (_) { matches = false; }
+    if (!matches) continue;
+    const providerName = normalizeText_(row.PROVEEDOR || '');
+    const provider = providers.find(function (item) { return [item.name].concat(item.aliases || []).some(function (name) { return normalizeText_(name) === providerName; }); });
+    if (provider) return { provider: provider, evidence: String(row.CAMPO || 'PDF') + ': ' + pattern };
+  }
+  return null;
 }

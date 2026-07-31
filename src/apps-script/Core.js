@@ -8,8 +8,10 @@ function apiOk_(data, requestId) { return { ok: true, data: data, requestId: req
 
 function apiError_(error, requestId) {
   const message = error && error.message ? error.message : String(error);
-  const code = error && error.code ? error.code : 'SERVER_ERROR';
-  return { ok: false, error: { code: code, message: message, retryable: Boolean(error && error.retryable), details: error && error.details ? error.details : undefined }, requestId: requestId || uuid_() };
+  const quota = /quota|too many requests|rate limit|service invoked too many times|límite de servicio/i.test(message);
+  const code = error && error.code ? error.code : quota ? 'QUOTA_LIMIT' : 'SERVER_ERROR';
+  const safeMessage = quota ? 'Google ha alcanzado temporalmente una cuota. La operación se ha detenido conservando el punto de continuación.' : message;
+  return { ok: false, error: { code: code, message: safeMessage, retryable: quota || Boolean(error && error.retryable), details: error && error.details ? error.details : undefined }, requestId: requestId || uuid_() };
 }
 
 function withApi_(payload, callback, options) {

@@ -67,4 +67,25 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(mergeSource).toContain("String(row.FASE || '') !== 'FINALIZADO'");
     expect(mergeSource).not.toContain("APP.SHEETS.INVOICES, row.__row");
   });
+
+  it('no inventa moneda y conserva compatibilidad con REGLAS', () => {
+    const gmail = source('GmailService.js');
+    expect(gmail).toContain("if (!currency) errors.push('Moneda ausente o ambigua')");
+    expect(gmail).toContain('function providerFromRules_');
+    expect(gmail).toContain('APP.SHEETS.RULES');
+    expect(gmail).not.toContain("fields.currency || 'EUR'");
+    expect(source('InvoiceService.js')).not.toContain("MONEDA: row.MONEDA || 'EUR'");
+  });
+
+  it('elimina la conversión OCR también cuando falla la lectura', () => {
+    const gmail = source('GmailService.js');
+    const failureCleanup = "if (!text && lastError) { try { DriveApp.getFileById(created.id).setTrashed(true); }";
+    expect(gmail).toContain(failureCleanup);
+  });
+
+  it('detiene de forma controlada al alcanzar cuotas', () => {
+    const core = source('Core.js');
+    expect(core).toContain("'QUOTA_LIMIT'");
+    expect(core).toContain('conservando el punto de continuación');
+  });
 });
