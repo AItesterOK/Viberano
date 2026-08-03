@@ -8,7 +8,7 @@ Diseñar con IA las pantallas móviles mínimas que explican el valor principal 
 
 ### 1. Dashboard · pantalla estrella ⭐
 
-El responsable ve de un vistazo el estado del lote, las facturas archivadas y las revisiones pendientes, y entra directamente en el trabajo prioritario.
+Una persona que llega por primera vez entiende que la app localiza facturas PDF en el correo, valida sus datos y duplicados, pide revisión humana cuando hay dudas y las archiva por fecha y proveedor.
 
 ![Dashboard de facturas](diseño/01_dashboard_facturas_pantalla_estrella.png)
 
@@ -33,7 +33,7 @@ El responsable comprueba el reparto por estados, el destino de archivo y el núm
 ## Decisiones de alcance
 
 - Se entregan cuatro pantallas verticales y táctiles, el máximo recomendado por el reto.
-- El dashboard es la pantalla estrella porque resume el propósito y conduce a la acción principal.
+- El dashboard es la pantalla estrella porque explica en menos de cinco segundos qué entra, qué valida la app, dónde interviene una persona y cómo queda organizado el archivo, sin dejar de conducir al trabajo pendiente.
 - Proveedores, métricas, conciliación e historial quedan fuera de esta entrega visual mínima.
 - El Sprint 2 contiene imágenes y reglas de diseño, no una aplicación funcional.
 - `DESIGN.md` fija el nombre, los colores, la tipografía y los patrones que deberán reutilizarse en el siguiente sprint.

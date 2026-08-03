@@ -18,7 +18,7 @@
 
 ## Pantallas seleccionadas
 
-1. **Facturas de gasto**: dashboard y pantalla estrella del flujo.
+1. **Facturas de gasto**: dashboard explicativo y pantalla estrella; comunica de inmediato que la app localiza facturas PDF en el correo, valida sus datos y duplicados, solicita revisión humana y las archiva por fecha y proveedor.
 2. **Revisión manual**: bandeja de documentos que requieren intervención.
 3. **Detalle de factura**: contraste de evidencia y validación de campos.
 4. **Aprobar lote**: confirmación segura antes del archivo masivo.
