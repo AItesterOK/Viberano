@@ -25,7 +25,7 @@ function withApi_(payload, callback, options) {
     }
     return apiOk_(callback(user, requestId), requestId);
   } catch (error) {
-    try { logEvent_('ERROR', 'API_ERROR', '', error.message || String(error), { code: error.code || 'SERVER_ERROR' }, '', requestId); } catch (_) {}
+    try { logEvent_('ERROR', 'API_ERROR', '', error.message || String(error), { code: error.code || 'SERVER_ERROR', details: error.details || {} }, '', requestId); } catch (_) {}
     return apiError_(error, requestId);
   }
 }
@@ -40,6 +40,18 @@ function appError_(code, message, retryable, details) {
 
 function getActiveEmail_() { return String(Session.getActiveUser().getEmail() || '').trim().toLowerCase(); }
 function getEffectiveEmail_() { return String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase(); }
+
+// Ejecutar manualmente una sola vez desde el editor antes del primer acceso web.
+// Fuerza el consentimiento de todos los servicios sin modificar Gmail, Drive o Sheets.
+function authorizeApplication() {
+  return {
+    activeUser: Session.getActiveUser().getEmail(),
+    effectiveUser: Session.getEffectiveUser().getEmail(),
+    gmailAddress: Gmail.Users.getProfile('me').emailAddress,
+    spreadsheetName: SpreadsheetApp.openById(APP.SPREADSHEET_ID).getName(),
+    invoiceFolderId: Drive.Files.get(APP.INVOICE_FOLDER_ID, { fields: 'id' }).id,
+  };
+}
 
 function assertAuthorized_() {
   const active = getActiveEmail_();
@@ -68,7 +80,24 @@ function safeJsonParse_(value, fallback) {
 function toBoolean_(value) { return value === true || String(value).toUpperCase() === 'TRUE'; }
 
 function base64UrlDecode_(value) {
-  return Utilities.base64DecodeWebSafe(String(value || '').replace(/-/g, '+').replace(/_/g, '/'));
+  if (Array.isArray(value)) return value;
+  const text = String(value || '').replace(/\s+/g, '');
+  if (!text) throw appError_('ATTACHMENT_DATA_EMPTY', 'Gmail no devolvió bytes para el adjunto.', false, { valueType: typeof value, isArray: Array.isArray(value) });
+  const padded = text + '='.repeat((4 - text.length % 4) % 4);
+  try {
+    return Utilities.base64DecodeWebSafe(padded);
+  } catch (webSafeError) {
+    try {
+      return Utilities.base64Decode(padded.replace(/-/g, '+').replace(/_/g, '/'));
+    } catch (standardError) {
+      throw appError_('ATTACHMENT_DECODE_FAILED', 'Gmail devolvió un adjunto que no se pudo descodificar.', false, {
+        valueType: typeof value,
+        length: text.length,
+        remainder: text.length % 4,
+        urlSafeAlphabet: /^[A-Za-z0-9_-]+={0,2}$/.test(text),
+      });
+    }
+  }
 }
 
 function sanitizeFileName_(value) { return String(value || '').replace(/[<>:"/\\|?*]/g, '-').replace(/\s+/g, ' ').trim(); }

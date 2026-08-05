@@ -115,7 +115,7 @@ function invoiceFromRow_(row) {
 
 function batchFromRow_(row) {
   const documents = getRows_(APP.SHEETS.DOCUMENTS).filter(function (doc) { return String(doc.LOTE_ID) === String(row.LOTE_ID); }).map(documentFromRow_);
-  return { id: String(row.LOTE_ID || ''), status: String(row.ESTADO || ''), dateFrom: String(row.FECHA_DESDE || ''), dateTo: String(row.FECHA_HASTA || ''), requestedEmails: Number(row.MAX_CORREOS || 0), reviewedEmails: Number(row.CORREOS_REVISADOS || 0), pdfCount: Number(row.PDF_ENCONTRADOS || 0), progress: Number(row.PROGRESO || 0), createdAt: String(row.CREADO_EN || ''), createdBy: String(row.CREADO_POR || ''), approvedAt: String(row.APROBADO_EN || '') || undefined, approvedBy: String(row.APROBADO_POR || '') || undefined, cursor: String(row.CURSOR || ''), documents: documents, error: String(row.ERROR || '') || undefined, __row: row.__row };
+  return { id: String(row.LOTE_ID || ''), status: String(row.ESTADO || ''), dateFrom: parseDate_(row.FECHA_DESDE), dateTo: parseDate_(row.FECHA_HASTA), requestedEmails: Number(row.MAX_CORREOS || 0), reviewedEmails: Number(row.CORREOS_REVISADOS || 0), pdfCount: Number(row.PDF_ENCONTRADOS || 0), progress: Number(row.PROGRESO || 0), createdAt: String(row.CREADO_EN || ''), createdBy: String(row.CREADO_POR || ''), approvedAt: String(row.APROBADO_EN || '') || undefined, approvedBy: String(row.APROBADO_POR || '') || undefined, cursor: String(row.CURSOR || ''), documents: documents, error: String(row.ERROR || '') || undefined, __row: row.__row };
 }
 
 function getActiveBatch_() {

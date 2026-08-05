@@ -5,9 +5,10 @@ function startBatch_(payload, user, requestId) {
   if (existing) throw appError_('ACTIVE_BATCH_EXISTS', 'Ya existe un lote activo: ' + existing.id + '.');
   const config = getConfigMap_();
   const max = Math.min(Math.max(Number(payload.maxEmails || 10), 1), Math.min(Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), APP.MAX_BATCH_SIZE));
-  const dateFrom = parseDate_(payload.dateFrom) || String(config.APP_START_DATE || APP.START_DATE);
+  const minimumDate = parseDate_(config.APP_START_DATE) || APP.START_DATE;
+  const dateFrom = parseDate_(payload.dateFrom) || minimumDate;
   const dateTo = parseDate_(payload.dateTo) || Utilities.formatDate(new Date(), APP.TIMEZONE, 'yyyy-MM-dd');
-  if (dateFrom < String(config.APP_START_DATE || APP.START_DATE)) throw appError_('DATE_OUT_OF_RANGE', 'La fecha inicial no puede ser anterior a ' + (config.APP_START_DATE || APP.START_DATE) + '.');
+  if (dateFrom < minimumDate) throw appError_('DATE_OUT_OF_RANGE', 'La fecha inicial no puede ser anterior a ' + minimumDate + '.');
   if (dateFrom > dateTo) throw appError_('INVALID_DATE_RANGE', 'La fecha inicial debe ser anterior o igual a la final.');
   const id = 'LOT-' + Utilities.formatDate(new Date(), APP.TIMEZONE, 'yyyyMMdd-HHmmss') + '-' + uuid_().slice(0, 6);
   appendObject_(APP.SHEETS.BATCHES, { LOTE_ID: id, TIPO: 'GMAIL', ESTADO: 'ANALIZANDO', FECHA_DESDE: dateFrom, FECHA_HASTA: dateTo, MAX_CORREOS: max, CORREOS_REVISADOS: 0, PDF_ENCONTRADOS: 0, CURSOR: '', PENDING_MESSAGE_IDS_JSON: '[]', PENDING_NEXT_CURSOR: '', CORREOS_PROCESADOS_JSON: '[]', PROGRESO: 0, CREADO_EN: nowIso_(), CREADO_POR: user, REQUEST_ID: requestId });
@@ -35,8 +36,11 @@ function analyzeBatchSlice_(batchId, user, requestId) {
     updateObjectRow_(APP.SHEETS.BATCHES, batchRow.__row, { ESTADO: 'PENDIENTE DE APROBACIÓN', PROGRESO: 100 });
     return batchFromRow_(Object.assign({}, batchRow, { ESTADO: 'PENDIENTE DE APROBACIÓN', PROGRESO: 100 }));
   }
-  const afterEpoch = Math.floor(new Date(String(batchRow.FECHA_DESDE) + 'T00:00:00+02:00').getTime() / 1000);
-  const beforeEpoch = Math.floor(new Date(String(batchRow.FECHA_HASTA) + 'T23:59:59+02:00').getTime() / 1000) + 1;
+  const batchDateFrom = parseDate_(batchRow.FECHA_DESDE);
+  const batchDateTo = parseDate_(batchRow.FECHA_HASTA);
+  if (!batchDateFrom || !batchDateTo) throw appError_('INVALID_BATCH_DATES', 'El lote no contiene un rango de fechas válido.');
+  const afterEpoch = Math.floor(new Date(batchDateFrom + 'T00:00:00+02:00').getTime() / 1000);
+  const beforeEpoch = Math.floor(new Date(batchDateTo + 'T23:59:59+02:00').getTime() / 1000) + 1;
   const query = 'after:' + afterEpoch + ' before:' + beforeEpoch + ' has:attachment filename:pdf -in:spam -in:trash';
   let pendingIds = safeJsonParse_(batchRow.PENDING_MESSAGE_IDS_JSON, []);
   let nextCursor = String(batchRow.PENDING_NEXT_CURSOR || '');

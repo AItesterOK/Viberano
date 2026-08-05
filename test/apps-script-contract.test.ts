@@ -89,6 +89,24 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(core).toContain('conservando el punto de continuación');
   });
 
+  it('normaliza las fechas que Google Sheets devuelve como objetos Date', () => {
+    const gmail = source('GmailService.js');
+    expect(gmail).toContain("const minimumDate = parseDate_(config.APP_START_DATE) || APP.START_DATE");
+    expect(gmail).toContain('const batchDateFrom = parseDate_(batchRow.FECHA_DESDE)');
+    expect(gmail).toContain('const batchDateTo = parseDate_(batchRow.FECHA_HASTA)');
+    expect(gmail).not.toContain("String(batchRow.FECHA_DESDE) + 'T00:00:00+02:00'");
+  });
+
+  it('descodifica adjuntos Gmail como Base64 URL-safe sin convertir el alfabeto', () => {
+    const core = source('Core.js');
+    expect(core).toContain('if (Array.isArray(value)) return value');
+    expect(core).toContain("appError_('ATTACHMENT_DATA_EMPTY'");
+    expect(core).toContain("const padded = text + '='.repeat((4 - text.length % 4) % 4)");
+    expect(core).toContain('Utilities.base64DecodeWebSafe(padded)');
+    expect(core).toContain("Utilities.base64Decode(padded.replace(/-/g, '+').replace(/_/g, '/'))");
+    expect(core).toContain("appError_('ATTACHMENT_DECODE_FAILED'");
+  });
+
   it('exige confirmación separada para activar producción', () => {
     const api = source('Api.js');
     expect(api).toContain("payload.confirmation || '') !== 'ACTIVAR_PRODUCCION'");
