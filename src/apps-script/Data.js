@@ -57,6 +57,11 @@ function getConfigMap_() {
   }
 }
 
+function effectiveStartDate_(config) {
+  const configured = parseDate_((config || {}).APP_START_DATE) || APP.START_DATE;
+  return configured < APP.START_DATE ? APP.START_DATE : configured;
+}
+
 function upsertConfig_(key, value, description) {
   const rows = getRows_(APP.SHEETS.CONFIG);
   const existing = rows.find(function (row) { return String(row.CLAVE) === key; });

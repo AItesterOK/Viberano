@@ -14,7 +14,7 @@ function apiBootstrap() {
     const reviewDocuments = schemaReady ? reviewDocuments_() : [];
     const triggers = projectTriggers_();
     return {
-      settings: { mode: String(config.APP_MODE || 'DRY_RUN'), user: user, effectiveUser: getEffectiveEmail_(), allowedUsers: String(config.APP_ALLOWED_USERS || APP.OWNER_EMAIL).split(/[;,\s]+/).filter(Boolean), timezone: String(config.APP_TIMEZONE || APP.TIMEZONE), spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), sliceSize: Number(config.APP_SLICE_SIZE || APP.SLICE_SIZE), startDate: parseDate_(config.APP_START_DATE) || APP.START_DATE, services: { gmail: true, drive: true, sheets: true }, triggers: triggers || [], triggerDiagnosticAvailable: triggers !== null, schemaReady: schemaReady },
+      settings: { mode: String(config.APP_MODE || 'DRY_RUN'), user: user, effectiveUser: getEffectiveEmail_(), allowedUsers: String(config.APP_ALLOWED_USERS || APP.OWNER_EMAIL).split(/[;,\s]+/).filter(Boolean), timezone: String(config.APP_TIMEZONE || APP.TIMEZONE), spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), sliceSize: Number(config.APP_SLICE_SIZE || APP.SLICE_SIZE), startDate: effectiveStartDate_(config), services: { gmail: true, drive: true, sheets: true }, triggers: triggers || [], triggerDiagnosticAvailable: triggers !== null, schemaReady: schemaReady },
       activeBatch: schemaReady ? getActiveBatch_() : null, reviewDocuments: reviewDocuments, invoices: invoices, suppliers: providerRows, metrics: metrics, bankImports: schemaReady ? allBankImports_() : [], audit: logRows.map(function (row) { return { id: String(row.ID_EVENTO || ('legacy-log-' + row.__row)), timestamp: String(row.FECHA_HORA || ''), level: String(row.NIVEL || 'INFO'), action: String(row['ACCIÓN'] || ''), object: String(row.DOCUMENTO || ''), detail: String(row.DETALLE || ''), user: String(row.USUARIO || 'sistema'), batchId: String(row.LOTE_ID || '') || undefined }; }), reviewCount: reviewDocuments.length, processedCount: invoices.filter(function (item) { return item.status === 'PROCESADA'; }).length, duplicateCount: invoices.filter(function (item) { return item.status === 'DUPLICADO IGNORADO'; }).length,
     };
   });
@@ -117,7 +117,8 @@ function apiUpdateSettings(payload) {
     upsertConfig_('APP_ALLOWED_USERS', allowed.join(','), 'Correos autorizados separados por coma');
     upsertConfig_('APP_MAX_BATCH_SIZE', String(max), 'Máximo de correos por lote');
     upsertConfig_('APP_SLICE_SIZE', String(slice), 'Correos por ejecución interna');
-    upsertConfig_('APP_START_DATE', parseDate_(input.startDate) || APP.START_DATE, 'Inicio mínimo de búsqueda en Gmail');
+    const requestedStartDate = parseDate_(input.startDate) || APP.START_DATE;
+    upsertConfig_('APP_START_DATE', requestedStartDate < APP.START_DATE ? APP.START_DATE : requestedStartDate, 'Inicio mínimo de búsqueda en Gmail');
     logEvent_('INFO', 'CONFIG_ACTUALIZADA', 'CONFIG', 'Configuración operativa actualizada', { before: before, after: getConfigMap_() }, '', requestId, user);
     return settingsResponse_(getConfigMap_(), user);
   }, { lock: true });
@@ -125,7 +126,7 @@ function apiUpdateSettings(payload) {
 
 function settingsResponse_(config, user) {
   const triggers = projectTriggers_();
-  return { mode: String(config.APP_MODE || 'DRY_RUN'), user: user, effectiveUser: getEffectiveEmail_(), allowedUsers: String(config.APP_ALLOWED_USERS || APP.OWNER_EMAIL).split(/[;,\s]+/).filter(Boolean), timezone: String(config.APP_TIMEZONE || APP.TIMEZONE), spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), sliceSize: Number(config.APP_SLICE_SIZE || APP.SLICE_SIZE), startDate: parseDate_(config.APP_START_DATE) || APP.START_DATE, services: { gmail: true, drive: true, sheets: true }, triggers: triggers || [], triggerDiagnosticAvailable: triggers !== null, schemaReady: true };
+  return { mode: String(config.APP_MODE || 'DRY_RUN'), user: user, effectiveUser: getEffectiveEmail_(), allowedUsers: String(config.APP_ALLOWED_USERS || APP.OWNER_EMAIL).split(/[;,\s]+/).filter(Boolean), timezone: String(config.APP_TIMEZONE || APP.TIMEZONE), spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), sliceSize: Number(config.APP_SLICE_SIZE || APP.SLICE_SIZE), startDate: effectiveStartDate_(config), services: { gmail: true, drive: true, sheets: true }, triggers: triggers || [], triggerDiagnosticAvailable: triggers !== null, schemaReady: true };
 }
 
 function buildMetrics_(invoices) {

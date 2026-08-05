@@ -5,7 +5,7 @@ function startBatch_(payload, user, requestId) {
   if (existing) throw appError_('ACTIVE_BATCH_EXISTS', 'Ya existe un lote activo: ' + existing.id + '.');
   const config = getConfigMap_();
   const max = Math.min(Math.max(Number(payload.maxEmails || 10), 1), Math.min(Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), APP.MAX_BATCH_SIZE));
-  const minimumDate = parseDate_(config.APP_START_DATE) || APP.START_DATE;
+  const minimumDate = effectiveStartDate_(config);
   const dateFrom = parseDate_(payload.dateFrom) || minimumDate;
   const dateTo = parseDate_(payload.dateTo) || Utilities.formatDate(new Date(), APP.TIMEZONE, 'yyyy-MM-dd');
   if (dateFrom < minimumDate) throw appError_('DATE_OUT_OF_RANGE', 'La fecha inicial no puede ser anterior a ' + minimumDate + '.');

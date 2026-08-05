@@ -13,6 +13,12 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(source('Api.js')).toContain('triggerDiagnosticAvailable: triggers !== null');
   });
 
+  it('fija la continuación cronológica en el 18 de julio de 2026', () => {
+    expect(source('Config.js')).toContain("START_DATE: '2026-07-18'");
+    expect(source('GmailService.js')).toContain('const minimumDate = effectiveStartDate_(config)');
+    expect(source('Data.js')).toContain('configured < APP.START_DATE ? APP.START_DATE : configured');
+  });
+
   it('restringe el despliegue al dominio y a la identidad del propietario', () => {
     expect(manifest.webapp).toEqual({ access: 'DOMAIN', executeAs: 'USER_DEPLOYING' });
     const core = source('Core.js');
@@ -97,7 +103,7 @@ describe('contrato de seguridad de Apps Script', () => {
 
   it('normaliza las fechas que Google Sheets devuelve como objetos Date', () => {
     const gmail = source('GmailService.js');
-    expect(gmail).toContain("const minimumDate = parseDate_(config.APP_START_DATE) || APP.START_DATE");
+    expect(gmail).toContain('const minimumDate = effectiveStartDate_(config)');
     expect(gmail).toContain('const batchDateFrom = parseDate_(batchRow.FECHA_DESDE)');
     expect(gmail).toContain('const batchDateTo = parseDate_(batchRow.FECHA_HASTA)');
     expect(gmail).not.toContain("String(batchRow.FECHA_DESDE) + 'T00:00:00+02:00'");

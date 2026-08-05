@@ -96,7 +96,7 @@ function QueueItem({ label, value, detail, icon, action }: { label: string; valu
 }
 
 function ProcessingPage({ snapshot, updateSnapshot, navigate }: PageProps) {
-  const [form, setForm] = useState({ dateFrom: '2026-01-01', dateTo: new Date().toISOString().slice(0, 10), maxEmails: 10 });
+  const [form, setForm] = useState({ dateFrom: snapshot.settings.startDate, dateTo: new Date().toISOString().slice(0, 10), maxEmails: 10 });
   const [working, setWorking] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [cancelConfirm, setCancelConfirm] = useState(false);
