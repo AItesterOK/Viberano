@@ -19,6 +19,13 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(source('Data.js')).toContain('configured < APP.START_DATE ? APP.START_DATE : configured');
   });
 
+  it('no confunde a ReparaPRO cliente con el emisor de una venta', () => {
+    const gmail = source('GmailService.js');
+    expect(gmail).toContain('const reparaProAsBuyer =');
+    expect(gmail).toContain('reparaProAsIssuer && !reparaProAsBuyer');
+    expect(gmail).toContain('total\\s+(?:a\\s+pagar|factura|bruto)');
+  });
+
   it('restringe el despliegue al dominio y a la identidad del propietario', () => {
     expect(manifest.webapp).toEqual({ access: 'DOMAIN', executeAs: 'USER_DEPLOYING' });
     const core = source('Core.js');

@@ -211,7 +211,9 @@ function classifyInvoiceText_(text, sender, subject) {
   const negativeHits = negative.filter(function (term) { return normalized.indexOf(term) !== -1; });
   const signalHits = invoiceSignals.filter(function (term) { return normalized.indexOf(term) !== -1; });
   if (negativeHits.length && signalHits.length < 3) return { status: 'NO ES FACTURA', phase: 'LISTO PARA APROBAR', reason: 'El contenido identifica ' + negativeHits[0], fields: {}, evidence: [{ field: 'classification', value: 'NO ES FACTURA', source: 'PDF', excerpt: negativeHits.join(', ') }] };
-  if ((normalized.indexOf('reparapro sociedad limitada') !== -1 || normalized.indexOf('reparapro iphone mac ipad') !== -1) && /factura|invoice/.test(normalized)) return { status: 'FACTURA DE VENTA', phase: 'LISTO PARA APROBAR', reason: 'Documento emitido por ReparaPRO', fields: {}, evidence: [{ field: 'issuer', value: 'ReparaPRO', source: 'PDF', excerpt: 'Emisor identificado como ReparaPRO' }] };
+  const reparaProAsBuyer = /(?:cliente|facturar a|bill to|customer|n\.?i\.?f\.? cliente)[\s\S]{0,400}(?:reparapro|b09740036)/.test(normalized);
+  const reparaProAsIssuer = /reparapro[\s\S]{0,180}(?:cif|nif|vat)[\s:#-]*(?:es)?b09740036/.test(normalized.slice(0, 700));
+  if (reparaProAsIssuer && !reparaProAsBuyer && /factura|invoice/.test(normalized)) return { status: 'FACTURA DE VENTA', phase: 'LISTO PARA APROBAR', reason: 'Documento emitido por ReparaPRO', fields: {}, evidence: [{ field: 'issuer', value: 'ReparaPRO', source: 'PDF', excerpt: 'CIF de ReparaPRO acreditado como emisor' }] };
   if (signalHits.length < 3) return { status: 'REVISIÓN MANUAL', phase: 'EN REVISIÓN', reason: 'No hay señales suficientes para identificar una factura', fields: {}, evidence: [{ field: 'classification', value: signalHits.join(', '), source: 'PDF', excerpt: 'Señales detectadas insuficientes' }] };
   const complex = ['factura rectificativa', 'rectificativa', 'credit note', 'nota de credito', 'abono', 'corrective invoice'].find(function (term) { return normalized.indexOf(term) !== -1; });
   const providers = activeProviders_();
@@ -222,12 +224,12 @@ function classifyInvoiceText_(text, sender, subject) {
     const names = [item.name].concat(item.aliases || []).map(normalizeText_).filter(Boolean);
     return (item.domain && senderDomain && senderDomain.endsWith(item.domain.toLowerCase())) || names.some(function (name) { return name.length > 3 && normalized.indexOf(name) !== -1; }) || (item.taxId && normalized.indexOf(normalizeText_(item.taxId)) !== -1);
   });
-  const numberPattern = /(?:invoice\s*(?:number|no\.?|#)|n[uú]mero\s+de\s+factura|factura\s*(?:n[ºo°.]|#))\s*[:#-]?\s*([A-Z0-9][A-Z0-9\/_-]{2,})/gi;
+  const numberPattern = /(?:invoice\s*(?:number|no\.?|#)|n[uú]mero\s+de\s+factura|n[ºo°.]?\s*factura|factura\s*(?:n[ºo°.]|#))\s*[:#-]?\s*([A-Z0-9][A-Z0-9\/_-]{2,})/gi;
   const numberMatches = Array.from(text.matchAll(numberPattern));
   const numberMatch = numberMatches.length ? numberMatches[0] : null;
   const distinctNumbers = numberMatches.map(function (match) { return normalizeText_(match[1]); }).filter(function (value, index, list) { return value && list.indexOf(value) === index; });
   const dateMatch = text.match(/(?:fecha(?:\s+de\s+emisi[oó]n)?|invoice\s+date|date)\s*[:#-]?\s*(20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]20\d{2})/i);
-  const totalMatches = Array.from(text.matchAll(/(?:grand\s+total|importe\s+total|total\s+(?:a\s+pagar|factura)|amount\s+due)\s*[:€$]?\s*([\d.,]+)\s*(EUR|USD|GBP|€|\$)?/gi));
+  const totalMatches = Array.from(text.matchAll(/(?:grand\s+total|importe\s+total|total\s+(?:a\s+pagar|factura|bruto)|amount\s+due)\s*[:€$]?\s*([\d.,]+)\s*(EUR|USD|GBP|€|\$)?/gi));
   const totalMatch = totalMatches.length ? totalMatches[totalMatches.length - 1] : null;
   const total = totalMatch ? parseNumber_(totalMatch[1]) : null;
   const explicitCurrency = text.match(/\b(EUR|USD|GBP|CHF|PLN|CAD|AUD)\b/i);

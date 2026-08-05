@@ -8,6 +8,9 @@ test('muestra la mesa operativa y navega por el flujo documental', async ({ page
   await expect(page.getByRole('heading', { name: 'Analizar y aprobar un lote' })).toBeVisible();
   await expect(page.getByLabel('Desde')).toHaveValue('2026-07-18');
   await expect(page.getByText('factura-demo-lista.pdf')).toBeVisible();
+  await page.getByRole('button', { name: 'Abrir detalle' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Revisión manual' })).toBeVisible();
+  await expect(page.getByText('factura-demo-lista.pdf').first()).toBeVisible();
 });
 
 test('expone revisión humana, proveedores y conciliación sin declarar impagos', async ({ page }) => {
@@ -34,7 +37,8 @@ test('mantiene y resuelve una excepción aunque el lote pueda cerrarse', async (
   await page.getByRole('button', { name: 'Guardar y reevaluar' }).click();
   await expect(page.getByRole('button', { name: 'Aprobar documento' })).toBeVisible();
   await page.getByRole('button', { name: 'Aprobar documento' }).click();
-  await expect(page.getByText('No hay revisiones pendientes')).toBeVisible();
+  await expect(page.getByText('factura-demo-revision.pdf')).toHaveCount(0);
+  await expect(page.getByText('factura-demo-lista.pdf').first()).toBeVisible();
 });
 
 test('fusiona proveedores de forma reversible sin borrar el histórico', async ({ page }) => {
