@@ -28,7 +28,7 @@ function callServer<T>(method: string, ...args: unknown[]): Promise<ApiResult<T>
   return new Promise((resolve) => {
     const runner = window.google?.script?.run;
     if (!runner) throw new Error('Apps Script no disponible');
-    const success = runner.withSuccessHandler((value) => resolve(value as ApiResult<T>)).withFailureHandler((error) => resolve({ ok: false, error: { code: 'SERVER_ERROR', message: error.message }, requestId: requestId() }));
+    const success = runner.withSuccessHandler((value) => resolve(value && typeof value === 'object' ? value as ApiResult<T> : { ok: false, error: { code: 'EMPTY_SERVER_RESPONSE', message: 'Google no devolvió una respuesta válida. Recarga la aplicación o reintenta la operación.' }, requestId: requestId() })).withFailureHandler((error) => resolve({ ok: false, error: { code: 'SERVER_ERROR', message: error.message }, requestId: requestId() }));
     const fn = success[method] as ((...values: unknown[]) => void) | undefined;
     if (!fn) resolve({ ok: false, error: { code: 'METHOD_NOT_FOUND', message: `Método ${method} no disponible` }, requestId: requestId() });
     else fn.apply(success, args);

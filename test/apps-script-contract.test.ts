@@ -84,6 +84,12 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(invoice).toContain("SELECCIONADO: phase === 'LISTO PARA APROBAR'");
   });
 
+  it('acota el historial enviado durante el arranque', () => {
+    const api = source('Api.js');
+    expect(api).toContain("safeRows_(APP.SHEETS.LOG).slice(-50).reverse()");
+    expect(api).toContain("detail: String(row.DETALLE || '').slice(0, 1000)");
+  });
+
   it('fusiona proveedores sin borrar el histórico', () => {
     const api = source('Api.js');
     const mergeStart = api.indexOf('function apiMergeSuppliers');

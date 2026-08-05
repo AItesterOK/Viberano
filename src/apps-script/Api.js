@@ -9,13 +9,15 @@ function apiBootstrap() {
     const invoiceCounts = invoices.reduce(function (map, invoice) { const key = normalizeText_(invoice.supplier); map[key] = (map[key] || 0) + 1; return map; }, {});
     providerRows.forEach(function (provider) { provider.invoiceCount = invoiceCounts[normalizeText_(provider.name)] || 0; delete provider.__row; });
     const metrics = buildMetrics_(invoices);
-    const logRows = safeRows_(APP.SHEETS.LOG).slice(-100).reverse();
+    // El LOG conserva el JSON completo en Sheets, pero el arranque solo necesita
+    // un resumen acotado para no superar el límite de respuesta de google.script.run.
+    const logRows = safeRows_(APP.SHEETS.LOG).slice(-50).reverse();
     const schemaReady = Boolean(spreadsheet_().getSheetByName(APP.SHEETS.BATCHES) && spreadsheet_().getSheetByName(APP.SHEETS.DOCUMENTS) && spreadsheet_().getSheetByName(APP.SHEETS.MOVEMENTS) && spreadsheet_().getSheetByName(APP.SHEETS.RECONCILIATIONS));
     const reviewDocuments = schemaReady ? reviewDocuments_() : [];
     const triggers = projectTriggers_();
     return {
       settings: { mode: String(config.APP_MODE || 'DRY_RUN'), user: user, effectiveUser: getEffectiveEmail_(), allowedUsers: String(config.APP_ALLOWED_USERS || APP.OWNER_EMAIL).split(/[;,\s]+/).filter(Boolean), timezone: String(config.APP_TIMEZONE || APP.TIMEZONE), spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), sliceSize: Number(config.APP_SLICE_SIZE || APP.SLICE_SIZE), startDate: effectiveStartDate_(config), services: { gmail: true, drive: true, sheets: true }, triggers: triggers || [], triggerDiagnosticAvailable: triggers !== null, schemaReady: schemaReady },
-      activeBatch: schemaReady ? getActiveBatch_() : null, reviewDocuments: reviewDocuments, invoices: invoices, suppliers: providerRows, metrics: metrics, bankImports: schemaReady ? allBankImports_() : [], audit: logRows.map(function (row) { return { id: String(row.ID_EVENTO || ('legacy-log-' + row.__row)), timestamp: String(row.FECHA_HORA || ''), level: String(row.NIVEL || 'INFO'), action: String(row['ACCIÓN'] || ''), object: String(row.DOCUMENTO || ''), detail: String(row.DETALLE || ''), user: String(row.USUARIO || 'sistema'), batchId: String(row.LOTE_ID || '') || undefined }; }), reviewCount: reviewDocuments.length, processedCount: invoices.filter(function (item) { return item.status === 'PROCESADA'; }).length, duplicateCount: invoices.filter(function (item) { return item.status === 'DUPLICADO IGNORADO'; }).length,
+      activeBatch: schemaReady ? getActiveBatch_() : null, reviewDocuments: reviewDocuments, invoices: invoices, suppliers: providerRows, metrics: metrics, bankImports: schemaReady ? allBankImports_() : [], audit: logRows.map(function (row) { return { id: String(row.ID_EVENTO || ('legacy-log-' + row.__row)), timestamp: String(row.FECHA_HORA || ''), level: String(row.NIVEL || 'INFO'), action: String(row['ACCIÓN'] || ''), object: String(row.DOCUMENTO || ''), detail: String(row.DETALLE || '').slice(0, 1000), user: String(row.USUARIO || 'sistema'), batchId: String(row.LOTE_ID || '') || undefined }; }), reviewCount: reviewDocuments.length, processedCount: invoices.filter(function (item) { return item.status === 'PROCESADA'; }).length, duplicateCount: invoices.filter(function (item) { return item.status === 'DUPLICADO IGNORADO'; }).length,
     };
   });
 }
