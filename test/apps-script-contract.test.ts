@@ -90,6 +90,12 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(api).toContain("detail: String(row.DETALLE || '').slice(0, 1000)");
   });
 
+  it('normaliza todas las respuestas para google.script.run', () => {
+    const core = source('Core.js');
+    expect(core).toContain('JSON.parse(JSON.stringify(data))');
+    expect(core).toContain('data === undefined ? null');
+  });
+
   it('fusiona proveedores sin borrar el histórico', () => {
     const api = source('Api.js');
     const mergeStart = api.indexOf('function apiMergeSuppliers');

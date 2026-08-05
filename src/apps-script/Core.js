@@ -4,7 +4,12 @@ function nowIso_() {
 
 function uuid_() { return Utilities.getUuid(); }
 
-function apiOk_(data, requestId) { return { ok: true, data: data, requestId: requestId || uuid_() }; }
+function apiOk_(data, requestId) {
+  // google.script.run solo admite valores JSON seguros. Una fecha de Sheets,
+  // un undefined o un número no finito puede convertir toda la respuesta en null.
+  const serializable = data === undefined ? null : JSON.parse(JSON.stringify(data));
+  return { ok: true, data: serializable, requestId: requestId || uuid_() };
+}
 
 function apiError_(error, requestId) {
   const message = error && error.message ? error.message : String(error);
