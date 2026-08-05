@@ -184,6 +184,7 @@ export interface AppSettings {
   startDate: string;
   services: Record<'gmail' | 'drive' | 'sheets', boolean>;
   triggers?: { id: string; handler: string; eventType: string; source: string }[];
+  triggerDiagnosticAvailable?: boolean;
   schemaReady?: boolean;
 }
 

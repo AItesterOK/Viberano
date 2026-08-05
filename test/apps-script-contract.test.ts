@@ -7,6 +7,12 @@ const source = (name: string) => fs.readFileSync(path.join(root, name), 'utf8');
 const manifest = JSON.parse(source('appsscript.json')) as { oauthScopes: string[]; webapp: { access: string; executeAs: string } };
 
 describe('contrato de seguridad de Apps Script', () => {
+  it('no bloquea el arranque si el web app no puede leer activadores', () => {
+    expect(source('Core.js')).toContain('catch (_)');
+    expect(source('Core.js')).toContain('return null;');
+    expect(source('Api.js')).toContain('triggerDiagnosticAvailable: triggers !== null');
+  });
+
   it('restringe el despliegue al dominio y a la identidad del propietario', () => {
     expect(manifest.webapp).toEqual({ access: 'DOMAIN', executeAs: 'USER_DEPLOYING' });
     const core = source('Core.js');

@@ -54,9 +54,13 @@ function authorizeApplication() {
 }
 
 function projectTriggers_() {
-  return ScriptApp.getProjectTriggers().map(function (trigger) {
-    return { id: trigger.getUniqueId(), handler: trigger.getHandlerFunction(), eventType: String(trigger.getEventType()), source: String(trigger.getTriggerSource()) };
-  });
+  try {
+    return ScriptApp.getProjectTriggers().map(function (trigger) {
+      return { id: trigger.getUniqueId(), handler: trigger.getHandlerFunction(), eventType: String(trigger.getEventType()), source: String(trigger.getTriggerSource()) };
+    });
+  } catch (_) {
+    return null;
+  }
 }
 
 function disableLegacyTriggers_(payload, user, requestId) {
@@ -69,7 +73,7 @@ function disableLegacyTriggers_(payload, user, requestId) {
     ScriptApp.deleteTrigger(trigger);
   });
   logEvent_('WARN', 'ACTIVADORES_ANTIGUOS_DESACTIVADOS', 'TRIGGERS', removed.length + ' activadores retirados', { removed: removed }, '', requestId, user);
-  return { removed: removed, remaining: projectTriggers_() };
+  return { removed: removed, remaining: projectTriggers_() || [] };
 }
 
 function assertAuthorized_() {
