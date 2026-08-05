@@ -81,7 +81,8 @@ export const api = {
     if (serverAvailable()) return callServer<InvoiceDocument>('apiSaveDocumentReview', { document, reason, requestId: requestId() });
     await delay();
     const errors = validateInvoice(document, mock.suppliers);
-    const updated: InvoiceDocument = { ...document, reviewReason: reason || errors.join('; '), phase: errors.length ? 'EN REVISIÓN' : 'LISTO PARA APROBAR', proposedStatus: errors.length ? 'REVISIÓN MANUAL' : document.proposedStatus };
+    const keepInReview = document.proposedStatus === 'REVISIÓN MANUAL';
+    const updated: InvoiceDocument = { ...document, reviewReason: reason || errors.join('; '), phase: errors.length || keepInReview ? 'EN REVISIÓN' : 'LISTO PARA APROBAR', proposedStatus: errors.length || keepInReview ? 'REVISIÓN MANUAL' : document.proposedStatus, selected: !(errors.length || keepInReview) };
     mock.activeBatch = { ...mock.activeBatch!, documents: mock.activeBatch!.documents.map((item) => item.id === updated.id ? updated : item) };
     mock.reviewDocuments = mock.reviewDocuments.map((item) => item.id === updated.id ? updated : item);
     return ok(structuredClone(updated));

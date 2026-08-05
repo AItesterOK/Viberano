@@ -77,6 +77,13 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(invoice.indexOf('if (sameSource)')).toBeLessThan(invoice.indexOf("writeInvoiceRegister_(row, 'DUPLICADO IGNORADO'"));
   });
 
+  it('mantiene las excepciones justificadas fuera de la aprobación', () => {
+    const invoice = source('InvoiceService.js');
+    expect(invoice).toContain("const keepInReview = input.proposedStatus === 'REVISIÓN MANUAL'");
+    expect(invoice).toContain("errors.length || keepInReview ? 'EN REVISIÓN' : 'LISTO PARA APROBAR'");
+    expect(invoice).toContain("SELECCIONADO: phase === 'LISTO PARA APROBAR'");
+  });
+
   it('fusiona proveedores sin borrar el histórico', () => {
     const api = source('Api.js');
     const mergeStart = api.indexOf('function apiMergeSuppliers');

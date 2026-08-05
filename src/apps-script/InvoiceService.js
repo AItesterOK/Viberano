@@ -14,8 +14,9 @@ function saveDocumentReview_(payload, user, requestId) {
     if (input.total === null || Number(input.total) <= 0) errors.push('Importe inválido');
     if (!/^[A-Z]{3}$/.test(String(input.currency || ''))) errors.push('Moneda inválida');
   }
-  const phase = errors.length ? 'EN REVISIÓN' : 'LISTO PARA APROBAR';
-  const proposed = errors.length ? 'REVISIÓN MANUAL' : input.proposedStatus;
+  const keepInReview = input.proposedStatus === 'REVISIÓN MANUAL';
+  const phase = errors.length || keepInReview ? 'EN REVISIÓN' : 'LISTO PARA APROBAR';
+  const proposed = errors.length || keepInReview ? 'REVISIÓN MANUAL' : input.proposedStatus;
   const previous = documentFromRow_(row);
   updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, { FECHA_FACTURA: input.invoiceDate || '', PROVEEDOR: provider ? provider.name : input.supplier || '', PROVEEDOR_ID: provider ? provider.id : '', CIF_NIF: input.taxId || '', NUMERO_FACTURA: input.invoiceNumber || '', IMPORTE_TOTAL: input.total === null ? '' : Number(input.total), MONEDA: String(input.currency || '').toUpperCase(), FASE: phase, ESTADO_PROPUESTO: proposed, MOTIVO_REVISION: errors.length ? errors.join('; ') : String(payload.reason), EVIDENCIA_JSON: JSON.stringify((input.evidence || []).concat([{ field: 'manualDecision', value: proposed, source: 'MANUAL', excerpt: String(payload.reason) }])), SELECCIONADO: phase === 'LISTO PARA APROBAR', ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, REQUEST_ID: requestId });
   logEvent_('INFO', 'DOCUMENTO_REVISADO', input.id, String(payload.reason), { before: previous, after: input, validationErrors: errors }, String(row.LOTE_ID || ''), requestId, user);
