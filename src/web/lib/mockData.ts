@@ -47,7 +47,7 @@ const excludedDocument: InvoiceDocument = {
 };
 
 export const mockBatch: Batch = {
-  id: 'LOT-DEMO-0731', status: 'PENDIENTE DE APROBACIÓN', dateFrom: '2026-07-28', dateTo: '2026-07-31', requestedEmails: 10, reviewedEmails: 10, pdfCount: 3, progress: 100, createdAt: '2026-07-31T09:22:00Z', createdBy: user, cursor: 'msg-demo-ready', documents: [readyDocument, reviewDocument, excludedDocument],
+  id: 'LOT-DEMO-0731', status: 'PENDIENTE DE APROBACIÓN', dateFrom: '2026-07-28', dateTo: '2026-07-31', requestedEmails: 10, reviewedEmails: 10, pdfCount: 3, progress: 100, createdAt: '2026-07-31T09:22:00Z', createdBy: user, cursor: 'msg-demo-ready', nextSearchDate: '2026-08-01', documents: [readyDocument, reviewDocument, excludedDocument],
 };
 
 export const mockAudit: AuditEvent[] = [
