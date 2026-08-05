@@ -112,4 +112,46 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(api).toContain("payload.confirmation || '') !== 'ACTIVAR_PRODUCCION'");
     expect(api).toContain("appError_('PRODUCTION_CONFIRMATION_REQUIRED'");
   });
+
+  it('filtra correo saliente y conserva un cursor cronológico por día', () => {
+    const gmail = source('GmailService.js');
+    expect(gmail).toContain("(message.labelIds || []).indexOf('SENT')");
+    expect(gmail).toContain('isEligibleIncomingMessage_');
+    expect(gmail).toContain('FECHA_BUSQUEDA');
+    expect(gmail).toContain('PENDING_SCAN_IDS_JSON');
+    expect(gmail).toContain('CANDIDATOS_DIA_JSON');
+    expect(gmail).toContain('candidates.sort');
+    expect(gmail).toContain('nextDate_');
+  });
+
+  it('cancela lotes sin crear facturas ni archivos definitivos', () => {
+    const gmail = source('GmailService.js');
+    const start = gmail.indexOf('function cancelBatch_');
+    const end = gmail.indexOf('function analyzeBatchSlice_', start);
+    const cancel = gmail.slice(start, end);
+    expect(cancel).toContain("FASE: 'CANCELADO'");
+    expect(cancel).toContain("ESTADO: 'CANCELADO'");
+    expect(cancel).toContain('definitiveWrites: 0');
+    expect(cancel).not.toContain('APP.SHEETS.INVOICES');
+    expect(cancel).not.toContain('Drive.Files.create');
+    expect(source('Api.js')).toContain('function apiCancelBatch');
+  });
+
+  it('descarta vistas previas bancarias y bloquea decisiones prematuras', () => {
+    const bank = source('BankService.js');
+    expect(bank).toContain('function cancelBankImport_');
+    expect(bank).toContain("ESTADO_IMPORTACION: 'CANCELADA'");
+    expect(bank).toContain('setTrashed(true)');
+    expect(bank).toContain("appError_('BANK_IMPORT_NOT_CONFIRMED'");
+    expect(bank).toContain('PERIODO_DETECTADO_DESDE');
+    expect(source('Api.js')).toContain('function apiCancelBankImport');
+  });
+
+  it('permite inventariar y retirar solo activadores antiguos confirmados', () => {
+    const core = source('Core.js');
+    expect(core).toContain('function projectTriggers_');
+    expect(core).toContain("['procesarFacturasPendientes', 'myFunction']");
+    expect(core).toContain("'DESACTIVAR_AUTOMATIZACION_ANTIGUA'");
+    expect(core).toContain('ScriptApp.deleteTrigger(trigger)');
+  });
 });

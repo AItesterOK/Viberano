@@ -64,3 +64,11 @@ No cambies a `PRODUCTION` hasta revisar el piloto de 10 correos. Consulta [docs/
 - El modo seco impide el archivo y el registro definitivo.
 
 Consulta [spec.md](spec.md) para el contrato funcional y [docs/architecture.md](docs/architecture.md) para la implementación.
+
+## Diseño de referencia
+
+La aplicación funcional conserva los entregables visuales del Sprint 2 como referencia de producto:
+
+- [Sistema de diseño](DESIGN.md)
+- [Presentación de las cuatro pantallas](ENTREGA_SPRINT_2.md)
+- [Imágenes finales](diseño/)

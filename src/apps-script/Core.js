@@ -53,6 +53,25 @@ function authorizeApplication() {
   };
 }
 
+function projectTriggers_() {
+  return ScriptApp.getProjectTriggers().map(function (trigger) {
+    return { id: trigger.getUniqueId(), handler: trigger.getHandlerFunction(), eventType: String(trigger.getEventType()), source: String(trigger.getTriggerSource()) };
+  });
+}
+
+function disableLegacyTriggers_(payload, user, requestId) {
+  if (String(payload.confirmation || '') !== 'DESACTIVAR_AUTOMATIZACION_ANTIGUA') throw appError_('CONFIRMATION_REQUIRED', 'Debes confirmar la retirada de los activadores antiguos.');
+  const legacyHandlers = ['procesarFacturasPendientes', 'myFunction'];
+  const removed = [];
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (legacyHandlers.indexOf(trigger.getHandlerFunction()) === -1) return;
+    removed.push({ id: trigger.getUniqueId(), handler: trigger.getHandlerFunction(), eventType: String(trigger.getEventType()), source: String(trigger.getTriggerSource()) });
+    ScriptApp.deleteTrigger(trigger);
+  });
+  logEvent_('WARN', 'ACTIVADORES_ANTIGUOS_DESACTIVADOS', 'TRIGGERS', removed.length + ' activadores retirados', { removed: removed }, '', requestId, user);
+  return { removed: removed, remaining: projectTriggers_() };
+}
+
 function assertAuthorized_() {
   const active = getActiveEmail_();
   const effective = getEffectiveEmail_();

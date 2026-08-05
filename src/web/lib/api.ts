@@ -62,6 +62,14 @@ export const api = {
     return ok(structuredClone(mock.activeBatch));
   },
 
+  async cancelBatch(batchId: string, reason: string): Promise<ApiResult<Batch>> {
+    if (serverAvailable()) return callServer<Batch>('apiCancelBatch', { batchId, reason, requestId: requestId() });
+    await delay();
+    if (!mock.activeBatch || mock.activeBatch.id !== batchId) return { ok: false, error: { code: 'BATCH_NOT_FOUND', message: 'No hay un lote activo' }, requestId: requestId() };
+    mock.activeBatch = { ...mock.activeBatch, status: 'CANCELADO', cancelReason: reason, documents: mock.activeBatch.documents.map((item) => item.phase === 'FINALIZADO' ? item : { ...item, phase: 'CANCELADO', selected: false }) };
+    return ok(structuredClone(mock.activeBatch));
+  },
+
   async setupSchema(): Promise<ApiResult<{ backup: { id: string; name: string; url: string }; report: unknown[] }>> {
     if (serverAvailable()) return callServer('apiSetupSchema', { confirmation: 'CREAR_COPIA_Y_MIGRAR', requestId: requestId() });
     await delay(700);
@@ -155,6 +163,12 @@ export const api = {
     return ok(structuredClone(saved));
   },
 
+  async cancelBankImport(bankImport: BankImport, reason: string): Promise<ApiResult<BankImport>> {
+    if (serverAvailable()) return callServer<BankImport>('apiCancelBankImport', { importId: bankImport.id, reason, requestId: requestId() });
+    await delay();
+    return ok({ ...structuredClone(bankImport), status: 'CANCELADA' });
+  },
+
   async decideReconciliation(importId: string, movementId: string, status: string, invoiceId?: string): Promise<ApiResult<BankImport>> {
     if (serverAvailable()) return callServer<BankImport>('apiDecideReconciliation', { importId, movementId, status, invoiceId, requestId: requestId() });
     const bankImport = mock.bankImports.find((item) => item.id === importId)!;
@@ -166,5 +180,13 @@ export const api = {
     if (serverAvailable()) return callServer('apiUpdateSettings', { settings, confirmation: confirmProduction ? 'ACTIVAR_PRODUCCION' : '', requestId: requestId() });
     mock.settings = settings;
     return ok(structuredClone(settings));
+  },
+
+  async disableLegacyTriggers(): Promise<ApiResult<{ removed: AppSnapshot['settings']['triggers']; remaining: AppSnapshot['settings']['triggers'] }>> {
+    if (serverAvailable()) return callServer('apiDisableLegacyTriggers', { confirmation: 'DESACTIVAR_AUTOMATIZACION_ANTIGUA', requestId: requestId() });
+    const removed = (mock.settings.triggers || []).filter((item) => ['procesarFacturasPendientes', 'myFunction'].includes(item.handler));
+    const remaining = (mock.settings.triggers || []).filter((item) => !['procesarFacturasPendientes', 'myFunction'].includes(item.handler));
+    mock.settings = { ...mock.settings, triggers: remaining };
+    return ok({ removed, remaining });
   },
 };

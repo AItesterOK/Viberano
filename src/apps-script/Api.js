@@ -13,7 +13,7 @@ function apiBootstrap() {
     const schemaReady = Boolean(spreadsheet_().getSheetByName(APP.SHEETS.BATCHES) && spreadsheet_().getSheetByName(APP.SHEETS.DOCUMENTS) && spreadsheet_().getSheetByName(APP.SHEETS.MOVEMENTS) && spreadsheet_().getSheetByName(APP.SHEETS.RECONCILIATIONS));
     const reviewDocuments = schemaReady ? reviewDocuments_() : [];
     return {
-      settings: { mode: String(config.APP_MODE || 'DRY_RUN'), user: user, effectiveUser: getEffectiveEmail_(), allowedUsers: String(config.APP_ALLOWED_USERS || APP.OWNER_EMAIL).split(/[;,\s]+/).filter(Boolean), timezone: String(config.APP_TIMEZONE || APP.TIMEZONE), spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), sliceSize: Number(config.APP_SLICE_SIZE || APP.SLICE_SIZE), startDate: parseDate_(config.APP_START_DATE) || APP.START_DATE, services: { gmail: true, drive: true, sheets: true }, schemaReady: schemaReady },
+      settings: { mode: String(config.APP_MODE || 'DRY_RUN'), user: user, effectiveUser: getEffectiveEmail_(), allowedUsers: String(config.APP_ALLOWED_USERS || APP.OWNER_EMAIL).split(/[;,\s]+/).filter(Boolean), timezone: String(config.APP_TIMEZONE || APP.TIMEZONE), spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), sliceSize: Number(config.APP_SLICE_SIZE || APP.SLICE_SIZE), startDate: parseDate_(config.APP_START_DATE) || APP.START_DATE, services: { gmail: true, drive: true, sheets: true }, triggers: projectTriggers_(), schemaReady: schemaReady },
       activeBatch: schemaReady ? getActiveBatch_() : null, reviewDocuments: reviewDocuments, invoices: invoices, suppliers: providerRows, metrics: metrics, bankImports: schemaReady ? allBankImports_() : [], audit: logRows.map(function (row) { return { id: String(row.ID_EVENTO || ('legacy-log-' + row.__row)), timestamp: String(row.FECHA_HORA || ''), level: String(row.NIVEL || 'INFO'), action: String(row['ACCIÓN'] || ''), object: String(row.DOCUMENTO || ''), detail: String(row.DETALLE || ''), user: String(row.USUARIO || 'sistema'), batchId: String(row.LOTE_ID || '') || undefined }; }), reviewCount: reviewDocuments.length, processedCount: invoices.filter(function (item) { return item.status === 'PROCESADA'; }).length, duplicateCount: invoices.filter(function (item) { return item.status === 'DUPLICADO IGNORADO'; }).length,
     };
   });
@@ -22,13 +22,18 @@ function apiBootstrap() {
 function apiSetupSchema(payload) { return withApi_(payload, function (user, requestId) { if (!payload || payload.confirmation !== 'CREAR_COPIA_Y_MIGRAR') throw appError_('CONFIRMATION_REQUIRED', 'Debes confirmar la copia y migración aditiva.'); return setupSchema_(user, requestId); }, { lock: true }); }
 function apiStartBatch(payload) { return withApi_(payload, function (user, requestId) { return startBatch_(payload, user, requestId); }, { lock: true }); }
 function apiContinueBatch(payload) { return withApi_(payload, function (user, requestId) { return continueBatch_(payload.batchId, user, requestId); }, { lock: true }); }
+function apiCancelBatch(payload) { return withApi_(payload, function (user, requestId) { return cancelBatch_(payload, user, requestId); }, { lock: true }); }
 function apiSaveDocumentReview(payload) { return withApi_(payload, function (user, requestId) { return saveDocumentReview_(payload, user, requestId); }, { lock: true }); }
 function apiApproveDocument(payload) { return withApi_(payload, function (user, requestId) { return approveDocument_(payload.documentId, user, requestId); }, { lock: true }); }
 function apiApproveBatch(payload) { return withApi_(payload, function (user, requestId) { return approveBatch_(payload, user, requestId); }, { lock: true }); }
 function apiRetryBatch(payload) { return withApi_(payload, function (user, requestId) { return retryBatch_(payload.batchId, user, requestId); }, { lock: true }); }
 function apiPreviewBankImport(payload) { return withApi_(payload, function (user, requestId) { return previewBankImport_(payload, user, requestId); }, { lock: true }); }
 function apiConfirmBankImport(payload) { return withApi_(payload, function (user, requestId) { return confirmBankImport_(payload.importId, user, requestId); }, { lock: true }); }
+function apiCancelBankImport(payload) { return withApi_(payload, function (user, requestId) { return cancelBankImport_(payload, user, requestId); }, { lock: true }); }
 function apiDecideReconciliation(payload) { return withApi_(payload, function (user, requestId) { return decideReconciliation_(payload, user, requestId); }, { lock: true }); }
+
+function apiGetDiagnostics() { return withApi_(null, function () { return { triggers: projectTriggers_(), mode: String(getConfigMap_().APP_MODE || 'DRY_RUN'), version: APP.VERSION }; }); }
+function apiDisableLegacyTriggers(payload) { return withApi_(payload, function (user, requestId) { return disableLegacyTriggers_(payload, user, requestId); }, { lock: true }); }
 
 function apiListBatches() { return withApi_(null, function () { return safeRows_(APP.SHEETS.BATCHES).slice().reverse().map(batchFromRow_); }); }
 function apiGetBatch(payload) { return withApi_(payload, function () { const row = safeRows_(APP.SHEETS.BATCHES).find(function (item) { return String(item.LOTE_ID) === String(payload.batchId); }); if (!row) throw appError_('BATCH_NOT_FOUND', 'No se encuentra el lote.'); return batchFromRow_(row); }); }
@@ -118,7 +123,7 @@ function apiUpdateSettings(payload) {
 }
 
 function settingsResponse_(config, user) {
-  return { mode: String(config.APP_MODE || 'DRY_RUN'), user: user, effectiveUser: getEffectiveEmail_(), allowedUsers: String(config.APP_ALLOWED_USERS || APP.OWNER_EMAIL).split(/[;,\s]+/).filter(Boolean), timezone: String(config.APP_TIMEZONE || APP.TIMEZONE), spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), sliceSize: Number(config.APP_SLICE_SIZE || APP.SLICE_SIZE), startDate: parseDate_(config.APP_START_DATE) || APP.START_DATE, services: { gmail: true, drive: true, sheets: true }, schemaReady: true };
+  return { mode: String(config.APP_MODE || 'DRY_RUN'), user: user, effectiveUser: getEffectiveEmail_(), allowedUsers: String(config.APP_ALLOWED_USERS || APP.OWNER_EMAIL).split(/[;,\s]+/).filter(Boolean), timezone: String(config.APP_TIMEZONE || APP.TIMEZONE), spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), sliceSize: Number(config.APP_SLICE_SIZE || APP.SLICE_SIZE), startDate: parseDate_(config.APP_START_DATE) || APP.START_DATE, services: { gmail: true, drive: true, sheets: true }, triggers: projectTriggers_(), schemaReady: true };
 }
 
 function buildMetrics_(invoices) {

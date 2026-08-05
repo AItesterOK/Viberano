@@ -18,6 +18,7 @@ function previewBankImport_(payload, user, requestId) {
   try { normalized = normalizeBankRows_(values, payload.mapping || null); }
   catch (error) { try { DriveApp.getFileById(raw.id).setTrashed(true); } catch (_) {} throw error; }
   if (!normalized.rows.length) { try { DriveApp.getFileById(raw.id).setTrashed(true); } catch (_) {} throw appError_('EMPTY_BANK_FILE', 'No se encontraron movimientos válidos.'); }
+  const warnings = bankPeriodWarnings_(normalized.detectedPeriodFrom, normalized.detectedPeriodTo, parseDate_(payload.periodFrom), parseDate_(payload.periodTo), String(payload.coverage || ''));
   const invoices = safeRows_(APP.SHEETS.INVOICES).map(invoiceFromRow_).filter(function (invoice) { return invoice.status === 'PROCESADA'; });
   normalized.rows.forEach(function (movement, index) {
     const candidates = findBankCandidates_(movement, invoices);
@@ -25,10 +26,10 @@ function previewBankImport_(payload, user, requestId) {
     const candidate = candidates.length === 1 ? candidates[0] : null;
     const movementId = importId + '-M' + ('0000' + (index + 1)).slice(-4);
     const evidence = candidate ? bankEvidence_(movement, candidate) : candidates.length > 1 ? candidates.length + ' facturas candidatas con evidencia insuficiente para elegir' : '';
-    appendObject_(APP.SHEETS.MOVEMENTS, { MOVIMIENTO_ID: movementId, IMPORT_ID: importId, ARCHIVO_NOMBRE: payload.fileName, ARCHIVO_HASH: hash, RAW_FILE_ID: raw.id, URL_DRIVE: '', FUENTE: payload.source, PERIODO_DESDE: parseDate_(payload.periodFrom), PERIODO_HASTA: parseDate_(payload.periodTo), COBERTURA: payload.coverage, ESTADO_IMPORTACION: 'PREVISUALIZACIÓN', FECHA_OPERACION: movement.operationDate, FECHA_VALOR: movement.valueDate, CONCEPTO: movement.concept, IMPORTE: movement.amount, MONEDA: movement.currency, REFERENCIA: movement.reference, TIPO: movement.type, ESTADO_CONCILIACION: reconciliationStatus, FACTURA_CANDIDATA_ID: candidate ? candidate.id : '', EVIDENCIA: evidence, CREADO_EN: nowIso_(), CREADO_POR: user, REQUEST_ID: requestId });
+    appendObject_(APP.SHEETS.MOVEMENTS, { MOVIMIENTO_ID: movementId, IMPORT_ID: importId, ARCHIVO_NOMBRE: payload.fileName, ARCHIVO_HASH: hash, RAW_FILE_ID: raw.id, URL_DRIVE: '', FUENTE: payload.source, PERIODO_DESDE: parseDate_(payload.periodFrom), PERIODO_HASTA: parseDate_(payload.periodTo), PERIODO_DETECTADO_DESDE: normalized.detectedPeriodFrom, PERIODO_DETECTADO_HASTA: normalized.detectedPeriodTo, ADVERTENCIAS_JSON: JSON.stringify(warnings), COBERTURA: payload.coverage, ESTADO_IMPORTACION: 'PREVISUALIZACIÓN', FECHA_OPERACION: movement.operationDate, FECHA_VALOR: movement.valueDate, CONCEPTO: movement.concept, IMPORTE: movement.amount, MONEDA: movement.currency, REFERENCIA: movement.reference, TIPO: movement.type, ESTADO_CONCILIACION: reconciliationStatus, FACTURA_CANDIDATA_ID: candidate ? candidate.id : '', EVIDENCIA: evidence, CREADO_EN: nowIso_(), CREADO_POR: user, REQUEST_ID: requestId });
     if (candidate) appendObject_(APP.SHEETS.RECONCILIATIONS, { CONCILIACION_ID: 'REC-' + uuid_(), IMPORT_ID: importId, MOVIMIENTO_ID: movementId, FACTURA_ID: candidate.id, ESTADO: 'PROPUESTA', EVIDENCIA: evidence, DECISION: '', MOTIVO: '', CREADO_EN: nowIso_(), CREADO_POR: user, REQUEST_ID: requestId });
   });
-  logEvent_('INFO', 'BANCO_PREVISUALIZADO', importId, payload.fileName, { movements: normalized.rows.length, headerRow: normalized.headerRow }, '', requestId, user);
+  logEvent_('INFO', 'BANCO_PREVISUALIZADO', importId, payload.fileName, { movements: normalized.rows.length, headerRow: normalized.headerRow, detectedPeriodFrom: normalized.detectedPeriodFrom, detectedPeriodTo: normalized.detectedPeriodTo, warnings: warnings }, '', requestId, user);
   return bankImportById_(importId);
 }
 
@@ -78,7 +79,15 @@ function normalizeBankRows_(values, explicitMapping) {
     const reference = referenceIndexes.map(function (column) { return String(row[column] || '').trim(); }).filter(Boolean).join(' · ');
     rows.push({ operationDate: operationDate, valueDate: valueDate, concept: concept, amount: amount, currency: currency, reference: reference, type: classifyBankMovement_(amount, concept) });
   }
-  return { rows: rows, headerRow: headerRow };
+  const dates = rows.map(function (row) { return row.operationDate; }).sort();
+  return { rows: rows, headerRow: headerRow, detectedPeriodFrom: dates[0] || '', detectedPeriodTo: dates[dates.length - 1] || '' };
+}
+
+function bankPeriodWarnings_(detectedFrom, detectedTo, declaredFrom, declaredTo, coverage) {
+  const warnings = [];
+  if (detectedFrom !== declaredFrom || detectedTo !== declaredTo) warnings.push('El periodo declarado (' + declaredFrom + ' a ' + declaredTo + ') no coincide con las fechas detectadas (' + detectedFrom + ' a ' + detectedTo + ').');
+  if (detectedTo && detectedTo.slice(-2) !== String(new Date(Number(detectedTo.slice(0, 4)), Number(detectedTo.slice(5, 7)), 0).getDate()).padStart(2, '0') && normalizeText_(coverage).indexOf('parcial') === -1) warnings.push('La cobertura no identifica el extracto como parcial aunque no llega al último día del mes.');
+  return warnings;
 }
 
 function classifyBankMovement_(amount, concept) {
@@ -112,6 +121,7 @@ function confirmBankImport_(importId, user, requestId) {
   if (String(getConfigMap_().APP_MODE || 'DRY_RUN') !== 'PRODUCTION') throw appError_('DRY_RUN_ACTIVE', 'La aplicación está en modo seco. No se archivará el extracto.');
   const rows = safeRows_(APP.SHEETS.MOVEMENTS).filter(function (row) { return String(row.IMPORT_ID) === String(importId); });
   if (!rows.length) throw appError_('BANK_IMPORT_NOT_FOUND', 'No se encuentra la importación bancaria.');
+  if (String(rows[0].ESTADO_IMPORTACION) === 'CANCELADA') throw appError_('BANK_IMPORT_CANCELLED', 'La vista previa fue cancelada y no se puede archivar.');
   if (String(rows[0].ESTADO_IMPORTACION) === 'CONFIRMADA') return bankImportById_(importId);
   const rawId = String(rows[0].RAW_FILE_ID || '');
   const period = parseDate_(rows[0].PERIODO_DESDE);
@@ -126,6 +136,24 @@ function confirmBankImport_(importId, user, requestId) {
   return bankImportById_(importId);
 }
 
+function cancelBankImport_(payload, user, requestId) {
+  const repeated = eventByRequest_(requestId, 'BANCO_CANCELADO');
+  if (repeated) return bankImportById_(String(repeated.DOCUMENTO || ''));
+  const importId = String(payload.importId || '');
+  const reason = String(payload.reason || '').trim();
+  if (!reason) throw appError_('REASON_REQUIRED', 'Indica el motivo para descartar la vista previa.');
+  const rows = safeRows_(APP.SHEETS.MOVEMENTS).filter(function (row) { return String(row.IMPORT_ID) === importId; });
+  if (!rows.length) throw appError_('BANK_IMPORT_NOT_FOUND', 'No se encuentra la importación bancaria.');
+  if (String(rows[0].ESTADO_IMPORTACION) === 'CANCELADA') return bankImportById_(importId);
+  if (String(rows[0].ESTADO_IMPORTACION) === 'CONFIRMADA') throw appError_('BANK_IMPORT_ALREADY_CONFIRMED', 'Un extracto archivado no se puede descartar.');
+  const rawId = String(rows[0].RAW_FILE_ID || '');
+  if (rawId) try { DriveApp.getFileById(rawId).setTrashed(true); } catch (_) {}
+  rows.forEach(function (row) { updateObjectRow_(APP.SHEETS.MOVEMENTS, row.__row, { ESTADO_IMPORTACION: 'CANCELADA', CANCELADO_EN: nowIso_(), CANCELADO_POR: user, MOTIVO_CANCELACION: reason, REQUEST_ID: requestId }); });
+  safeRows_(APP.SHEETS.RECONCILIATIONS).filter(function (row) { return String(row.IMPORT_ID) === importId; }).forEach(function (row) { updateObjectRow_(APP.SHEETS.RECONCILIATIONS, row.__row, { ESTADO: 'CANCELADA', DECISION: 'CANCELADA', MOTIVO: reason, DECIDIDO_EN: nowIso_(), DECIDIDO_POR: user, REQUEST_ID: requestId }); });
+  logEvent_('WARN', 'BANCO_CANCELADO', importId, reason, { rawFileId: rawId, movedToTrash: Boolean(rawId) }, '', requestId, user);
+  return bankImportById_(importId);
+}
+
 function decideReconciliation_(payload, user, requestId) {
   const repeatedEvent = eventByRequest_(requestId, 'CONCILIACION_DECIDIDA');
   if (repeatedEvent) { const repeatedData = safeJsonParse_(repeatedEvent.DATOS_JSON, {}); const repeatedMovement = safeRows_(APP.SHEETS.MOVEMENTS).find(function (row) { return String(row.MOVIMIENTO_ID || '') === String(repeatedEvent.DOCUMENTO || ''); }); return bankImportById_(String(repeatedMovement && repeatedMovement.IMPORT_ID || payload.importId || repeatedData.importId || '')); }
@@ -133,6 +161,7 @@ function decideReconciliation_(payload, user, requestId) {
   if (allowed.indexOf(String(payload.status)) === -1) throw appError_('INVALID_RECONCILIATION_STATUS', 'Estado de conciliación no permitido.');
   const movement = safeRows_(APP.SHEETS.MOVEMENTS).find(function (row) { return String(row.MOVIMIENTO_ID) === String(payload.movementId) && String(row.IMPORT_ID) === String(payload.importId); });
   if (!movement) throw appError_('MOVEMENT_NOT_FOUND', 'No se encuentra el movimiento.');
+  if (String(movement.ESTADO_IMPORTACION) !== 'CONFIRMADA') throw appError_('BANK_IMPORT_NOT_CONFIRMED', 'Archiva primero el extracto antes de decidir conciliaciones.');
   const before = String(movement.ESTADO_CONCILIACION || '');
   updateObjectRow_(APP.SHEETS.MOVEMENTS, movement.__row, { ESTADO_CONCILIACION: payload.status, FACTURA_CANDIDATA_ID: payload.invoiceId || movement.FACTURA_CANDIDATA_ID || '', CREADO_POR: user, REQUEST_ID: requestId });
   const reconciliation = safeRows_(APP.SHEETS.RECONCILIATIONS).find(function (row) { return String(row.MOVIMIENTO_ID) === String(payload.movementId); });
@@ -150,7 +179,7 @@ function bankImportById_(importId) {
   const rows = safeRows_(APP.SHEETS.MOVEMENTS).filter(function (row) { return String(row.IMPORT_ID) === String(importId); });
   if (!rows.length) return null;
   const first = rows[0];
-  return { id: String(importId), fileName: String(first.ARCHIVO_NOMBRE || ''), fileHash: String(first.ARCHIVO_HASH || ''), source: String(first.FUENTE || ''), periodFrom: String(first.PERIODO_DESDE || ''), periodTo: String(first.PERIODO_HASTA || ''), coverage: String(first.COBERTURA || ''), status: String(first.ESTADO_IMPORTACION || 'PREVISUALIZACIÓN'), movementCount: rows.length, driveUrl: String(first.URL_DRIVE || '') || undefined, createdAt: String(first.CREADO_EN || ''), createdBy: String(first.CREADO_POR || ''), movements: rows.map(movementFromRow_) };
+  return { id: String(importId), fileName: String(first.ARCHIVO_NOMBRE || ''), fileHash: String(first.ARCHIVO_HASH || ''), source: String(first.FUENTE || ''), periodFrom: String(first.PERIODO_DESDE || ''), periodTo: String(first.PERIODO_HASTA || ''), detectedPeriodFrom: String(first.PERIODO_DETECTADO_DESDE || '') || undefined, detectedPeriodTo: String(first.PERIODO_DETECTADO_HASTA || '') || undefined, warnings: safeJsonParse_(first.ADVERTENCIAS_JSON, []), coverage: String(first.COBERTURA || ''), status: String(first.ESTADO_IMPORTACION || 'PREVISUALIZACIÓN'), movementCount: rows.length, driveUrl: String(first.URL_DRIVE || '') || undefined, createdAt: String(first.CREADO_EN || ''), createdBy: String(first.CREADO_POR || ''), movements: rows.map(movementFromRow_) };
 }
 
 function allBankImports_() {

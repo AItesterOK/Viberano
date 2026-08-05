@@ -68,3 +68,14 @@ test('no activa producción sin una confirmación separada', async ({ page }) =>
   await page.getByRole('button', { name: 'Guardar cambios' }).click();
   await expect(page.getByRole('button', { name: 'Guardado' })).toBeVisible();
 });
+
+test('cancela un lote sin presentar una acción de escritura', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Procesamiento|Procesar/ }).first().click();
+  await page.getByRole('button', { name: 'Cancelar lote sin escrituras' }).click();
+  await expect(page.getByRole('dialog', { name: 'Cancelar lote' })).toBeVisible();
+  await page.getByLabel('Motivo obligatorio').fill('El lote contiene correo saliente de ventas');
+  await page.getByRole('button', { name: 'Cancelar sin escrituras' }).click();
+  await expect(page.getByText('CANCELADO').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Iniciar análisis' })).toBeEnabled();
+});

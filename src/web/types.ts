@@ -11,6 +11,7 @@ export type WorkPhase =
   | 'LISTO PARA APROBAR'
   | 'EN REVISIÓN'
   | 'FINALIZADO'
+  | 'CANCELADO'
   | 'ERROR';
 
 export type BatchStatus =
@@ -46,6 +47,8 @@ export interface InvoiceDocument {
   attachmentId?: string;
   originalName: string;
   sender: string;
+  recipients?: string;
+  emailDirection?: 'ENTRANTE' | 'REENVIO RECIBIDO' | 'SALIENTE';
   subject: string;
   emailDate: string;
   invoiceDate: string;
@@ -80,6 +83,8 @@ export interface Batch {
   approvedAt?: string;
   approvedBy?: string;
   cursor?: string;
+  nextSearchDate?: string;
+  cancelReason?: string;
   documents: InvoiceDocument[];
   error?: string;
 }
@@ -145,6 +150,9 @@ export interface BankImport {
   coverage: string;
   status: 'PREVISUALIZACIÓN' | 'CONFIRMADA' | 'CANCELADA';
   movementCount: number;
+  detectedPeriodFrom?: string;
+  detectedPeriodTo?: string;
+  warnings?: string[];
   driveUrl?: string;
   createdAt: string;
   createdBy: string;
@@ -175,6 +183,7 @@ export interface AppSettings {
   sliceSize: number;
   startDate: string;
   services: Record<'gmail' | 'drive' | 'sheets', boolean>;
+  triggers?: { id: string; handler: string; eventType: string; source: string }[];
   schemaReady?: boolean;
 }
 

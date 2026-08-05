@@ -24,6 +24,21 @@ Tras migrar, comprobar que los recuentos históricos siguen siendo idénticos. N
 6. Verificar los enlaces, estados y hashes.
 7. Repetir la petición con el mismo request ID o volver a presentar el documento: no debe crearse una segunda copia.
 
+Los lotes recorren el periodo día a día, del correo entrante más antiguo al más reciente. Los mensajes enviados a clientes no consumen plazas; un reenvío enviado por la propia cuenta solo es elegible cuando `compras@reparapro.com` figura entre sus destinatarios.
+
+Si un lote se preparó con un alcance incorrecto, usar **Cancelar lote sin escrituras** e indicar un motivo. La cancelación conserva los borradores y la auditoría, pero no crea filas en `FACTURAS` ni archivos en la carpeta definitiva.
+
+## Extractos bancarios
+
+- La previsualización detecta el periodo real y advierte si no coincide con el declarado o si la cobertura no identifica un mes parcial.
+- **Descartar vista previa** cancela sus filas técnicas y envía el temporal a la papelera de Drive.
+- Primero se confirma y archiva el extracto; después se deciden individualmente las conciliaciones propuestas.
+- Una ausencia de coincidencia no acredita impago.
+
+## Activadores
+
+La pantalla Configuración muestra todos los activadores visibles para el propietario. Solo los handlers antiguos `procesarFacturasPendientes` y `myFunction` pueden retirarse desde la aplicación, con confirmación explícita y evento de auditoría. La versión funcional no crea activadores nuevos.
+
 ## Reversión
 
 - Volver a desplegar la versión Apps Script anterior.
