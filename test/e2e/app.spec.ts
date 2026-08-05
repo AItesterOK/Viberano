@@ -61,6 +61,7 @@ test('no activa producción sin una confirmación separada', async ({ page }) =>
   } else {
     await page.getByRole('button', { name: 'Configuración' }).first().click();
   }
+  await expect(page.getByRole('button', { name: 'Crear copia y actualizar estructura' })).toBeVisible();
   await page.getByLabel('Modo').selectOption('PRODUCTION');
   await page.getByRole('button', { name: 'Guardar cambios' }).click();
   await expect(page.getByText('Confirma de forma explícita la activación de producción.')).toBeVisible();
