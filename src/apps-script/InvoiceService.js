@@ -18,7 +18,7 @@ function saveDocumentReview_(payload, user, requestId) {
   const phase = errors.length || keepInReview ? 'EN REVISIÓN' : 'LISTO PARA APROBAR';
   const proposed = errors.length || keepInReview ? 'REVISIÓN MANUAL' : input.proposedStatus;
   const previous = documentFromRow_(row);
-  updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, { FECHA_FACTURA: input.invoiceDate || '', PROVEEDOR: provider ? provider.name : input.supplier || '', PROVEEDOR_ID: provider ? provider.id : '', CIF_NIF: input.taxId || '', NUMERO_FACTURA: input.invoiceNumber || '', IMPORTE_TOTAL: input.total === null ? '' : Number(input.total), MONEDA: String(input.currency || '').toUpperCase(), FASE: phase, ESTADO_PROPUESTO: proposed, MOTIVO_REVISION: errors.length ? errors.join('; ') : String(payload.reason), EVIDENCIA_JSON: JSON.stringify((input.evidence || []).concat([{ field: 'manualDecision', value: proposed, source: 'MANUAL', excerpt: String(payload.reason) }])), SELECCIONADO: phase === 'LISTO PARA APROBAR', ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, REQUEST_ID: requestId });
+  updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, { FECHA_FACTURA: parseDate_(input.invoiceDate), PROVEEDOR: provider ? provider.name : input.supplier || '', PROVEEDOR_ID: provider ? provider.id : '', CIF_NIF: input.taxId || '', NUMERO_FACTURA: input.invoiceNumber || '', IMPORTE_TOTAL: input.total === null ? '' : Number(input.total), MONEDA: String(input.currency || '').toUpperCase(), FASE: phase, ESTADO_PROPUESTO: proposed, MOTIVO_REVISION: errors.length ? errors.join('; ') : String(payload.reason), EVIDENCIA_JSON: JSON.stringify((input.evidence || []).concat([{ field: 'manualDecision', value: proposed, source: 'MANUAL', excerpt: String(payload.reason) }])), SELECCIONADO: phase === 'LISTO PARA APROBAR', ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, REQUEST_ID: requestId });
   logEvent_('INFO', 'DOCUMENTO_REVISADO', input.id, String(payload.reason), { before: previous, after: input, validationErrors: errors }, String(row.LOTE_ID || ''), requestId, user);
   return documentFromRow_(getRows_(APP.SHEETS.DOCUMENTS).find(function (item) { return item.__row === row.__row; }));
 }
@@ -112,17 +112,18 @@ function validateFinalInvoice_(row) {
 }
 
 function invoiceAccountingKey_(row) {
-  return [normalizeText_(row.PROVEEDOR || ''), normalizeText_(row.NUMERO_FACTURA || row['NÚMERO_FACTURA'] || ''), String(row.FECHA_FACTURA || ''), Number(row.IMPORTE_TOTAL || 0).toFixed(2), String(row.MONEDA || '').toUpperCase()].join('|');
+  return [normalizeText_(row.PROVEEDOR || ''), normalizeText_(row.NUMERO_FACTURA || row['NÚMERO_FACTURA'] || ''), parseDate_(row.FECHA_FACTURA), Number(row.IMPORTE_TOTAL || 0).toFixed(2), String(row.MONEDA || '').toUpperCase()].join('|');
 }
 
 function archiveInvoice_(row) {
   const raw = Gmail.Users.Messages.Attachments.get('me', String(row.MESSAGE_ID), String(row.ATTACHMENT_ID));
   const bytes = base64UrlDecode_(raw.data);
   if (bytesHash_(bytes) !== String(row.HASH_PDF)) throw appError_('SOURCE_CHANGED', 'La huella del adjunto ya no coincide con la analizada.');
-  const info = monthInfo_(String(row.FECHA_FACTURA));
+  const invoiceDate = parseDate_(row.FECHA_FACTURA);
+  const info = monthInfo_(invoiceDate);
   let parentId = APP.INVOICE_FOLDER_ID;
   [info.year, info.quarter, info.month].forEach(function (name) { parentId = ensureFolder_(parentId, name); });
-  const name = formatInvoiceName_({ invoiceDate: String(row.FECHA_FACTURA), supplier: String(row.PROVEEDOR), total: Number(row.IMPORTE_TOTAL), currency: String(row.MONEDA), invoiceNumber: String(row.NUMERO_FACTURA) });
+  const name = formatInvoiceName_({ invoiceDate: invoiceDate, supplier: String(row.PROVEEDOR), total: Number(row.IMPORTE_TOTAL), currency: String(row.MONEDA), invoiceNumber: String(row.NUMERO_FACTURA) });
   const existing = Drive.Files.list({ q: "name = '" + escapeDriveQuery_(name) + "' and '" + parentId + "' in parents and trashed = false", fields: 'files(id,name,webViewLink)', pageSize: 10 }).files || [];
   if (existing.length) throw appError_('FILE_EXISTS', 'Ya existe un archivo con el nombre de destino: ' + name + '.');
   const created = Drive.Files.create({ name: name, parents: [parentId], mimeType: 'application/pdf' }, Utilities.newBlob(bytes, 'application/pdf', name), { fields: 'id,name,webViewLink' });
@@ -136,7 +137,7 @@ function ensureFolder_(parentId, name) {
 }
 
 function writeInvoiceRegister_(row, status, savedName, driveUrl, observation, user) {
-  appendObject_(APP.SHEETS.INVOICES, { FECHA_FACTURA: row.FECHA_FACTURA || '', PROVEEDOR: row.PROVEEDOR || '', CIF_NIF: row.CIF_NIF || '', 'NÚMERO_FACTURA': row.NUMERO_FACTURA || '', IMPORTE_TOTAL: row.IMPORTE_TOTAL === '' ? 0 : Number(row.IMPORTE_TOTAL), MONEDA: row.MONEDA || '', ESTADO: status, ARCHIVO_DRIVE: savedName || '', URL_DRIVE: driveUrl || '', REMITENTE: row.REMITENTE || '', ASUNTO: row.ASUNTO || '', FECHA_PROCESO: nowIso_(), OBSERVACIONES: observation || '', FECHA_CORREO: row.FECHA_CORREO || '', NOMBRE_ORIGINAL: row.NOMBRE_ORIGINAL || '', MOTIVO_REVISION: status === 'REVISIÓN MANUAL' ? observation : '', REFERENCIA_CORREO: row.GMAIL_URL || '', ID_UNICO: row.SOURCE_KEY || '', HASH_PDF: row.HASH_PDF || '', LOTE_ID: row.LOTE_ID || '', USUARIO_DECISION: user, FECHA_DECISION: nowIso_(), EVIDENCIA_JSON: row.EVIDENCIA_JSON || '[]', VERSION_ESQUEMA: APP.VERSION });
+  appendObject_(APP.SHEETS.INVOICES, { FECHA_FACTURA: parseDate_(row.FECHA_FACTURA), PROVEEDOR: row.PROVEEDOR || '', CIF_NIF: row.CIF_NIF || '', 'NÚMERO_FACTURA': row.NUMERO_FACTURA || '', IMPORTE_TOTAL: row.IMPORTE_TOTAL === '' ? 0 : Number(row.IMPORTE_TOTAL), MONEDA: row.MONEDA || '', ESTADO: status, ARCHIVO_DRIVE: savedName || '', URL_DRIVE: driveUrl || '', REMITENTE: row.REMITENTE || '', ASUNTO: row.ASUNTO || '', FECHA_PROCESO: nowIso_(), OBSERVACIONES: observation || '', FECHA_CORREO: row.FECHA_CORREO || '', NOMBRE_ORIGINAL: row.NOMBRE_ORIGINAL || '', MOTIVO_REVISION: status === 'REVISIÓN MANUAL' ? observation : '', REFERENCIA_CORREO: row.GMAIL_URL || '', ID_UNICO: row.SOURCE_KEY || '', HASH_PDF: row.HASH_PDF || '', LOTE_ID: row.LOTE_ID || '', USUARIO_DECISION: user, FECHA_DECISION: nowIso_(), EVIDENCIA_JSON: row.EVIDENCIA_JSON || '[]', VERSION_ESQUEMA: APP.VERSION });
 }
 
 function retryBatch_(batchId, user, requestId) {

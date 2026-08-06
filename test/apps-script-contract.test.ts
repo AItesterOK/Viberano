@@ -136,10 +136,19 @@ describe('contrato de seguridad de Apps Script', () => {
 
   it('normaliza las fechas que Google Sheets devuelve como objetos Date', () => {
     const gmail = source('GmailService.js');
+    const data = source('Data.js');
+    const invoice = source('InvoiceService.js');
+    const core = source('Core.js');
     expect(gmail).toContain('const minimumDate = effectiveStartDate_(config)');
     expect(gmail).toContain('const batchDateFrom = parseDate_(batchRow.FECHA_DESDE)');
     expect(gmail).toContain('const batchDateTo = parseDate_(batchRow.FECHA_HASTA)');
     expect(gmail).not.toContain("String(batchRow.FECHA_DESDE) + 'T00:00:00+02:00'");
+    expect(data).toContain('invoiceDate: parseDate_(row.FECHA_FACTURA)');
+    expect(data).toContain('date: parseDate_(row.FECHA_FACTURA)');
+    expect(invoice).toContain('FECHA_FACTURA: parseDate_(input.invoiceDate)');
+    expect(invoice).toContain('const invoiceDate = parseDate_(row.FECHA_FACTURA)');
+    expect(invoice).toContain('FECHA_FACTURA: parseDate_(row.FECHA_FACTURA)');
+    expect(core).toContain("const parts = parseDate_(dateText).split('-').map(Number)");
   });
 
   it('descodifica adjuntos Gmail como Base64 URL-safe sin convertir el alfabeto', () => {

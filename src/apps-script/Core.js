@@ -155,11 +155,11 @@ function parseDate_(value) {
 }
 
 function formatInvoiceName_(doc) {
-  return [doc.invoiceDate, sanitizeFileName_(doc.supplier), Number(doc.total).toFixed(2) + ' ' + doc.currency, sanitizeFileName_(doc.invoiceNumber)].join(' - ') + '.pdf';
+  return [parseDate_(doc.invoiceDate), sanitizeFileName_(doc.supplier), Number(doc.total).toFixed(2) + ' ' + doc.currency, sanitizeFileName_(doc.invoiceNumber)].join(' - ') + '.pdf';
 }
 
 function monthInfo_(dateText) {
-  const parts = dateText.split('-').map(Number);
+  const parts = parseDate_(dateText).split('-').map(Number);
   const names = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
   const quarters = ['1er. Trimestre', '2do. Trimestre', '3er. Trimestre', '4to. Trimestre'];
   return { year: String(parts[0]), quarter: quarters[Math.floor((parts[1] - 1) / 3)], month: ('0' + parts[1]).slice(-2) + ' - ' + names[parts[1] - 1] };
