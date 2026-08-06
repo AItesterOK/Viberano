@@ -51,8 +51,12 @@ test('mantiene y resuelve una excepción aunque el lote pueda cerrarse', async (
   await page.goto('/');
   await page.getByRole('button', { name: /Revisión/ }).first().click();
   await page.getByLabel('Proveedor', { exact: true }).selectOption('sup-europa');
-  await page.getByRole('button', { name: 'Factura de gasto' }).click();
-  await page.getByRole('button', { name: 'Guardar y reevaluar' }).click();
+  const expenseDecision = page.getByRole('button', { name: 'Factura de gasto', exact: true });
+  await expenseDecision.click();
+  await expect(expenseDecision).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('Decisión preparada:')).toBeVisible();
+  await expect(page.getByText(/Factura de gasto\. Se aplicará al guardar\./)).toBeVisible();
+  await page.getByRole('button', { name: 'Guardar decisión' }).click();
   await expect(page.getByRole('button', { name: 'Aprobar documento' })).toBeVisible();
   await page.getByRole('button', { name: 'Aprobar documento' }).click();
   await expect(page.getByText('factura-demo-revision.pdf')).toHaveCount(0);

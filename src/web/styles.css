@@ -225,7 +225,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .evidence-panel > div > span { color: var(--repara-blue); font-size: 8px; font-weight: 800; }
 .evidence-panel strong { color: var(--ink-primary); font-size: 9px; }
 .evidence-panel p { margin: 3px 0 0; color: var(--ink-secondary); font-size: 9px; }
-.review-actions { margin-top: 18px; display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.decision-control { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); display: grid; gap: 10px; }
+.decision-control__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.decision-control__head strong { color: var(--ink-primary); font-size: 10px; }
+.decision-control__head span { color: var(--ink-tertiary); font-size: 8px; }
+.decision-control__options { display: flex; gap: 8px; flex-wrap: wrap; }
+.decision-control__options .button[aria-pressed="true"] { box-shadow: 0 0 0 3px rgba(0, 98, 255, .14); }
+.decision-feedback { margin: 10px 0 0; min-height: 38px; padding: 10px 12px; border: 1px solid rgba(0, 98, 255, .18); border-radius: var(--radius-sm); background: var(--info-bg); color: var(--ink-secondary); display: flex; align-items: center; gap: 8px; font-size: 9px; }
+.decision-feedback > svg { color: var(--repara-blue); flex: 0 0 auto; }
+.decision-feedback strong { color: var(--ink-primary); }
+.review-actions { margin-top: 10px; display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 
 .table-toolbar { margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
 .table-toolbar > span { margin-left: auto; color: var(--ink-tertiary); font-size: 9px; }
@@ -450,6 +459,9 @@ td small { display: block; margin-top: 3px; color: var(--ink-muted); font-size: 
   .review-detail__head { flex-direction: column; }
   .review-grid, .form-grid, .bank-form { grid-template-columns: 1fr; }
   .mapping-panel { grid-template-columns: 1fr; }
+  .decision-control__head { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .decision-control__options { flex-direction: column; }
+  .decision-control__options .button { width: 100%; }
   .review-actions { flex-direction: column; }
   .review-actions .button { width: 100%; }
   .table-toolbar { align-items: stretch; flex-direction: column; }
