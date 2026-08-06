@@ -171,7 +171,10 @@ function analyzeAttachment_(batchId, messageId, attachment, metadata, sourceKey,
   const raw = Gmail.Users.Messages.Attachments.get('me', messageId, attachment.attachmentId);
   const bytes = base64UrlDecode_(raw.data);
   const hash = bytesHash_(bytes);
-  const duplicate = getRows_(APP.SHEETS.INVOICES).some(function (row) { return String(row.HASH_PDF || '') === hash || String(row.ID_UNICO || '') === sourceKey; }) || getRows_(APP.SHEETS.DOCUMENTS).some(function (row) { return String(row.HASH_PDF || '') === hash; });
+  const batchStates = getRows_(APP.SHEETS.BATCHES).reduce(function (map, row) { map[String(row.LOTE_ID || '')] = String(row.ESTADO || ''); return map; }, {});
+  const registeredDuplicate = getRows_(APP.SHEETS.INVOICES).some(function (row) { return String(row.HASH_PDF || '') === hash || String(row.ID_UNICO || '') === sourceKey; });
+  const activeTechnicalDuplicate = getRows_(APP.SHEETS.DOCUMENTS).some(function (row) { return String(row.HASH_PDF || '') === hash && String(row.FASE || '') !== 'CANCELADO' && batchStates[String(row.LOTE_ID || '')] !== 'CANCELADO'; });
+  const duplicate = registeredDuplicate || activeTechnicalDuplicate;
   let extracted = { text: '', tempId: '' };
   let decision;
   try {

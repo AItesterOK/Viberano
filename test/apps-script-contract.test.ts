@@ -212,6 +212,13 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(source('Api.js')).toContain('function apiCancelBatch');
   });
 
+  it('permite reanalizar documentos procedentes de un lote cancelado', () => {
+    const gmail = source('GmailService.js');
+    expect(gmail).toContain("String(row.FASE || '') !== 'CANCELADO'");
+    expect(gmail).toContain("batchStates[String(row.LOTE_ID || '')] !== 'CANCELADO'");
+    expect(gmail).toContain('const duplicate = registeredDuplicate || activeTechnicalDuplicate');
+  });
+
   it('descarta vistas previas bancarias y bloquea decisiones prematuras', () => {
     const bank = source('BankService.js');
     expect(bank).toContain('function cancelBankImport_');
