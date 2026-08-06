@@ -23,7 +23,7 @@ describe('contrato de seguridad de Apps Script', () => {
     const gmail = source('GmailService.js');
     expect(gmail).toContain('const reparaProAsBuyer =');
     expect(gmail).toContain('reparaProAsIssuer && !reparaProAsBuyer');
-    expect(gmail).toContain('total\\s+(?:a\\s+pagar|factura|bruto|con\\s+impuestos)');
+    expect(gmail).toContain('total(?:\\s+(?:a\\s+pagar|factura|bruto|con\\s+impuestos|ttc|due))?');
   });
 
   it('restringe el despliegue al dominio y a la identidad del propietario', () => {

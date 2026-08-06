@@ -227,6 +227,7 @@ function classifyInvoiceText_(text, sender, subject, fileName, emailDate) {
   const signalHits = invoiceSignals.filter(function (term) { return normalized.indexOf(term) !== -1; });
   const strongInvoiceContext = isStrongInvoiceContext_(text, subject, fileName);
   const explicitNonInvoiceFile = /^(?:order[_ -]|bon[-_ ]livraison|entrega[_ -]|shipment[-_ ]slip|rmas?[_ -])/i.test(String(fileName || ''));
+  if (explicitNonInvoiceFile && !strongInvoiceContext) return { status: 'NO ES FACTURA', phase: 'LISTO PARA APROBAR', reason: 'El nombre y contenido identifican un documento de entrega, pedido o devolución', fields: {}, evidence: [{ field: 'classification', value: 'NO ES FACTURA', source: 'NOMBRE DE ARCHIVO', excerpt: String(fileName || '') }] };
   if (negativeHits.length && !strongInvoiceContext && (explicitNonInvoiceFile || signalHits.length < 2)) return { status: 'NO ES FACTURA', phase: 'LISTO PARA APROBAR', reason: 'El contenido identifica ' + negativeHits[0], fields: {}, evidence: [{ field: 'classification', value: 'NO ES FACTURA', source: 'PDF', excerpt: negativeHits.join(', ') }] };
   const reparaProAsBuyer = /(?:cliente|facturar a|bill to|customer|n\.?i\.?f\.? cliente)[\s\S]{0,400}(?:reparapro|b09740036)/.test(normalized);
   const reparaProAsIssuer = /reparapro[\s\S]{0,180}(?:cif|nif|vat)[\s:#-]*(?:es)?b09740036/.test(normalized.slice(0, 700));
@@ -351,7 +352,7 @@ function extractInvoiceNumber_(text, fileName, creditNote) {
   const labelled = /(?:invoice\s*(?:number|no\.?|#)|n[uú]mero\s+(?:de\s+)?factura|n[ºo°.]?\s*(?:de\s+)?factura|factura\s*(?:n[ºo°.]|#|num(?:ero)?\.?|number)|facture\s*(?:n[ºo°.]|#)|numero\s+fattura|fattura\s*(?:n[ºo°.]|#))\s*[:#-]?\s*([A-Z0-9][A-Z0-9\/_-]{2,})/gi;
   Array.from(String(text || '').matchAll(labelled)).forEach(function (match) { addExtractionCandidate_(candidates, match[1], 100, 'PDF', match[0]); });
   const fileBase = String(fileName || '').replace(/\.pdf$/i, '');
-  const filePatterns = creditNote ? [/\b(?:CN|NC)[-_\/]?\d[A-Z0-9\/_-]*/i] : [/\b(?:INV|GOP|E\d{2}OR|FA|AS|A|S)[-_\/]?\d[A-Z0-9\/_-]*/i, /(?:factura|facture|fattura|invoice)[-_ ]+([A-Z0-9]+(?:[-_\/]\d[A-Z0-9\/_-]*)+)/i];
+  const filePatterns = creditNote ? [/\b(?:CN|NC)[-_\/]?\d[A-Z0-9\/_-]*/i, /\bA[-_\/]\d[A-Z0-9\/_-]*/i] : [/\b(?:INV|GOP|E\d{2}OR|FA|AS|A|S)[-_\/]?\d[A-Z0-9\/_-]*/i, /(?:factura|facture|fattura|invoice)[-_ ]+([A-Z0-9]+(?:[-_\/]\d[A-Z0-9\/_-]*)+)/i];
   filePatterns.forEach(function (pattern) { const match = fileBase.match(pattern); if (match) addExtractionCandidate_(candidates, match[1] || match[0], 90, 'NOMBRE DE ARCHIVO', fileName); });
   if (creditNote) { const match = [fileBase, String(text || '')].map(function (value) { return value.match(/\b(?:CN|NC)[-_\/]?\d[A-Z0-9\/_-]*/i); }).find(Boolean); if (match) addExtractionCandidate_(candidates, match[0], 110, 'NOMBRE DE ARCHIVO/PDF', match[0]); }
   candidates.sort(function (a, b) { return b.score - a.score; });
@@ -362,8 +363,11 @@ function extractInvoiceNumber_(text, fileName, creditNote) {
 
 function extractInvoiceDate_(text, fileName, emailDate) {
   const candidates = [];
-  const labelled = /(?:fecha(?:\s+(?:de\s+)?(?:emisi[oó]n|expedici[oó]n|factura))?|invoice\s+date|date\s+(?:de\s+facture|de\s+facturation|d['’]?[ée]mission)|data\s+(?:della\s+fattura|emissione)|date)\s*[:#-]?\s*(20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]20\d{2})/gi;
+  const dateLabel = '(?:fecha(?:\\s+(?:de\\s+)?(?:emisi[oó]n|expedici[oó]n|factura))?|facturado\\s+el|invoice\\s+date|date\\s+(?:de\\s+facture|facture|de\\s+facturation|de\\s+cr[ée]ation|d[\'’]?[ée]mission)|data(?:\\s+(?:della\\s+fattura|emissione))?|date)';
+  const labelled = new RegExp(dateLabel + '\\s*[:#-]?\\s*(20\\d{2}[-/.]\\d{1,2}[-/.]\\d{1,2}|\\d{1,2}[-/.]\\d{1,2}[-/.]20\\d{2})', 'gi');
   Array.from(String(text || '').matchAll(labelled)).forEach(function (match) { const value = parseDate_(match[1]); if (isPlausibleInvoiceDate_(value, emailDate)) candidates.push({ value: value, score: 100, source: 'PDF', excerpt: match[0] }); });
+  const monthDate = new RegExp(dateLabel + '\\s*[:#-]?\\s*(\\d{1,2}\\s+(?:de\\s+)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|janvier|fevrier|février|mars|avril|mai|juin|juillet|aout|août|septembre|octobre|novembre|decembre|décembre|gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\\s+(?:de\\s+)?20\\d{2})', 'gi');
+  Array.from(String(text || '').matchAll(monthDate)).forEach(function (match) { const value = parseNamedMonthDate_(match[1]); if (isPlausibleInvoiceDate_(value, emailDate)) candidates.push({ value: value, score: 100, source: 'PDF', excerpt: match[0] }); });
   if (!candidates.length) {
     const header = String(text || '').slice(0, 1600);
     const dates = Array.from(header.matchAll(/\b(20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]20\d{2})\b/g));
@@ -373,6 +377,15 @@ function extractInvoiceDate_(text, fileName, emailDate) {
   }
   candidates.sort(function (a, b) { return b.score - a.score; });
   return candidates[0] || { value: '', score: 0, source: 'PDF', excerpt: '' };
+}
+
+function parseNamedMonthDate_(value) {
+  const normalized = normalizeText_(value).replace(/\bde\b/g, ' ').replace(/\s+/g, ' ').trim();
+  const match = normalized.match(/^(\d{1,2})\s+([a-z]+)\s+(20\d{2})$/);
+  if (!match) return '';
+  const months = { enero: 1, janvier: 1, gennaio: 1, febrero: 2, fevrier: 2, febbraio: 2, marzo: 3, mars: 3, abril: 4, avril: 4, aprile: 4, mayo: 5, mai: 5, maggio: 5, junio: 6, juin: 6, giugno: 6, julio: 7, juillet: 7, luglio: 7, agosto: 8, aout: 8, septembre: 9, septiembre: 9, settembre: 9, octubre: 10, octobre: 10, ottobre: 10, noviembre: 11, novembre: 11, dicembre: 12, diciembre: 12, decembre: 12 };
+  const month = months[match[2]];
+  return month ? [match[3], ('0' + month).slice(-2), ('0' + match[1]).slice(-2)].join('-') : '';
 }
 
 function isPlausibleInvoiceDate_(value, emailDate) {
@@ -385,7 +398,7 @@ function isPlausibleInvoiceDate_(value, emailDate) {
 
 function extractInvoiceTotal_(text) {
   const candidates = [];
-  const pattern = /(?:grand\s+total|importe\s+total|total\s+(?:a\s+pagar|factura|bruto|con\s+impuestos)|amount\s+due|total\s+ttc|net\s+[aà]\s+payer|totale\s+(?:fattura|da\s+pagare)|total\s+due)\s*[:\s]*(?:EUR|USD|GBP|CHF|PLN|CAD|AUD|€|\$)?\s*([-+]?\d[\d., ]*)\s*(EUR|USD|GBP|CHF|PLN|CAD|AUD|€|\$)?/gi;
+  const pattern = /(?:grand\s+total|importe\s+total|amount\s+due|net\s+[aà]\s+payer|total(?:\s+(?:a\s+pagar|factura|bruto|con\s+impuestos|ttc|due))?|totale(?:\s+(?:fattura|da\s+pagare))?)\s*(?:\([^)]{0,20}\))?\s*[:\s]*(?:EUR|USD|GBP|CHF|PLN|CAD|AUD|€|\$)?\s*([-+]?\d[\d., ]*)\s*(EUR|USD|GBP|CHF|PLN|CAD|AUD|€|\$)?/gi;
   Array.from(String(text || '').matchAll(pattern)).forEach(function (match) {
     const value = parseNumber_(match[1]);
     if (value !== null) candidates.push({ value: value, currencyToken: match[2] || (match[0].indexOf('€') !== -1 ? '€' : ''), excerpt: match[0] });

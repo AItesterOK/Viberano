@@ -89,4 +89,21 @@ describe('extracción documental de facturas', () => {
     expect(result.status).toBe('PROCESADA');
     expect(result.fields).toMatchObject({ supplier: 'LTronics', invoiceNumber: 'AS68039', invoiceDate: '2026-07-28', total: 88.5, currency: 'EUR' });
   });
+
+  it('reconoce un total sin sufijo y una fecha con el mes escrito', () => {
+    const result = classify(
+      'FACTURA\nFecha de emisión: 20 de julio de 2026\nTOTAL: 44,90 €\nAlbarán relacionado 22',
+      'CONTABILIDAD RPHONE B2B <contabilidad.rphoneb2b@outlook.es>',
+      'COMPONENTES DIGITAL-CXIN SL',
+      'Factura 1-008568 ReparaPRO Julio.pdf',
+      '2026-07-29T15:00:00Z',
+    );
+    expect(result.status).toBe('PROCESADA');
+    expect(result.fields).toMatchObject({ invoiceNumber: '1-008568', invoiceDate: '2026-07-20', total: 44.9, currency: 'EUR' });
+  });
+
+  it('clasifica un BON-LIVRAISON por el nombre aunque el OCR no diga albarán', () => {
+    const result = classify('UTOPYA\nCommande ES022483', 'Team UTOPYA <noreply@utopya.fr>', 'Votre commande est expédiée', 'BON-LIVRAISON-ES022483.pdf', '2026-07-29T12:00:00Z');
+    expect(result.status).toBe('NO ES FACTURA');
+  });
 });
