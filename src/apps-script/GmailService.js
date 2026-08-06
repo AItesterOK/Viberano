@@ -176,7 +176,7 @@ function analyzeAttachment_(batchId, messageId, attachment, metadata, sourceKey,
   let decision;
   try {
     extracted = ocrPdf_(bytes, attachment.filename);
-    decision = duplicate ? { status: 'DUPLICADO IGNORADO', phase: 'LISTO PARA APROBAR', reason: 'La huella SHA-256 ya existe en el registro', fields: {}, evidence: [{ field: 'duplicate', value: hash, source: 'PDF', excerpt: 'Coincidencia exacta de bytes' }] } : classifyInvoiceText_(extracted.text, metadata.sender, metadata.subject, attachment.filename);
+    decision = duplicate ? { status: 'DUPLICADO IGNORADO', phase: 'LISTO PARA APROBAR', reason: 'La huella SHA-256 ya existe en el registro', fields: {}, evidence: [{ field: 'duplicate', value: hash, source: 'PDF', excerpt: 'Coincidencia exacta de bytes' }] } : classifyInvoiceText_(extracted.text, metadata.sender, metadata.subject, attachment.filename, metadata.date);
   } catch (error) {
     decision = { status: 'REVISIÓN MANUAL', phase: 'EN REVISIÓN', reason: 'No se pudo extraer texto fiable: ' + (error.message || error), fields: {}, evidence: [] };
   } finally {
@@ -193,7 +193,18 @@ function analyzeAttachment_(batchId, messageId, attachment, metadata, sourceKey,
 
 function ocrPdf_(bytes, fileName) {
   const blob = Utilities.newBlob(bytes, 'application/pdf', fileName);
-  const created = Drive.Files.create({ name: 'OCR TEMP ' + uuid_(), mimeType: 'application/vnd.google-apps.document' }, blob, { ocrLanguage: 'es', fields: 'id,name' });
+  let created;
+  let createError;
+  for (let createAttempt = 0; createAttempt < 3; createAttempt += 1) {
+    try {
+      created = Drive.Files.create({ name: 'OCR TEMP ' + uuid_(), mimeType: 'application/vnd.google-apps.document' }, blob, { ocrLanguage: 'es', fields: 'id,name' });
+      break;
+    } catch (error) {
+      createError = error;
+      Utilities.sleep(Math.pow(2, createAttempt) * 1200);
+    }
+  }
+  if (!created) throw createError || appError_('OCR_CREATE_FAILED', 'No se pudo iniciar el OCR.');
   let text = '';
   let lastError;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -203,49 +214,44 @@ function ocrPdf_(bytes, fileName) {
   return { text: text, tempId: created.id };
 }
 
-function classifyInvoiceText_(text, sender, subject, fileName) {
+function classifyInvoiceText_(text, sender, subject, fileName, emailDate) {
   const normalized = normalizeText_(text);
   const documentContext = normalizeText_([fileName || '', subject || '', text].join('\n'));
   const evidence = [];
   const negative = ['presupuesto', 'propuesta comercial', 'propuesta de servicio', 'albaran', 'nota de entrega', 'shipment slip', 'confirmacion de pedido', 'etiqueta de devolucion'];
-  const invoiceSignals = ['factura', 'invoice', 'tax invoice', 'numero de factura', 'invoice number', 'iva', 'vat', 'importe total', 'grand total', 'amount due'];
+  const invoiceSignals = ['factura', 'facture', 'fattura', 'invoice', 'tax invoice', 'numero de factura', 'invoice number', 'iva', 'vat', 'importe total', 'grand total', 'amount due', 'total ttc', 'totale fattura'];
   const negativeHits = negative.filter(function (term) { return normalized.indexOf(term) !== -1; });
   const signalHits = invoiceSignals.filter(function (term) { return normalized.indexOf(term) !== -1; });
-  if (negativeHits.length && signalHits.length < 3) return { status: 'NO ES FACTURA', phase: 'LISTO PARA APROBAR', reason: 'El contenido identifica ' + negativeHits[0], fields: {}, evidence: [{ field: 'classification', value: 'NO ES FACTURA', source: 'PDF', excerpt: negativeHits.join(', ') }] };
+  const strongInvoiceContext = isStrongInvoiceContext_(text, subject, fileName);
+  const explicitNonInvoiceFile = /^(?:order[_ -]|bon[-_ ]livraison|entrega[_ -]|shipment[-_ ]slip|rmas?[_ -])/i.test(String(fileName || ''));
+  if (negativeHits.length && !strongInvoiceContext && (explicitNonInvoiceFile || signalHits.length < 2)) return { status: 'NO ES FACTURA', phase: 'LISTO PARA APROBAR', reason: 'El contenido identifica ' + negativeHits[0], fields: {}, evidence: [{ field: 'classification', value: 'NO ES FACTURA', source: 'PDF', excerpt: negativeHits.join(', ') }] };
   const reparaProAsBuyer = /(?:cliente|facturar a|bill to|customer|n\.?i\.?f\.? cliente)[\s\S]{0,400}(?:reparapro|b09740036)/.test(normalized);
   const reparaProAsIssuer = /reparapro[\s\S]{0,180}(?:cif|nif|vat)[\s:#-]*(?:es)?b09740036/.test(normalized.slice(0, 700));
-  if (reparaProAsIssuer && !reparaProAsBuyer && /factura|invoice/.test(normalized)) return { status: 'FACTURA DE VENTA', phase: 'LISTO PARA APROBAR', reason: 'Documento emitido por ReparaPRO', fields: {}, evidence: [{ field: 'issuer', value: 'ReparaPRO', source: 'PDF', excerpt: 'CIF de ReparaPRO acreditado como emisor' }] };
-  if (signalHits.length < 3) return { status: 'REVISIÓN MANUAL', phase: 'EN REVISIÓN', reason: 'No hay señales suficientes para identificar una factura', fields: {}, evidence: [{ field: 'classification', value: signalHits.join(', '), source: 'PDF', excerpt: 'Señales detectadas insuficientes' }] };
+  if (reparaProAsIssuer && !reparaProAsBuyer && strongInvoiceContext) return { status: 'FACTURA DE VENTA', phase: 'LISTO PARA APROBAR', reason: 'Documento emitido por ReparaPRO', fields: {}, evidence: [{ field: 'issuer', value: 'ReparaPRO', source: 'PDF', excerpt: 'CIF de ReparaPRO acreditado como emisor' }] };
+  if (!strongInvoiceContext && signalHits.length < 2) return { status: 'REVISIÓN MANUAL', phase: 'EN REVISIÓN', reason: 'No hay señales suficientes para identificar una factura', fields: {}, evidence: [{ field: 'classification', value: signalHits.join(', '), source: 'PDF', excerpt: 'Señales detectadas insuficientes' }] };
   const creditNoteTerm = ['credit note', 'nota de credito', 'abono', 'avoir'].find(function (term) { return documentContext.indexOf(term) !== -1; });
   const rectificativeTerm = ['factura rectificativa', 'rectificativa', 'corrective invoice'].find(function (term) { return documentContext.indexOf(term) !== -1; });
   const providers = activeProviders_();
   const domainMatch = String(sender || '').toLowerCase().match(/@([a-z0-9.-]+)/);
   const senderDomain = domainMatch ? domainMatch[1].replace(/[>\s].*$/, '') : '';
   const ruleMatch = providerFromRules_(text, sender, subject, providers);
-  const provider = ruleMatch ? ruleMatch.provider : providers.find(function (item) {
-    const names = [item.name].concat(item.aliases || []).map(normalizeText_).filter(Boolean);
-    return (item.domain && senderDomain && senderDomain.endsWith(item.domain.toLowerCase())) || names.some(function (name) { return name.length > 3 && normalized.indexOf(name) !== -1; }) || (item.taxId && normalized.indexOf(normalizeText_(item.taxId)) !== -1);
-  });
-  const numberPattern = /(?:invoice\s*(?:number|no\.?|#)|n[uú]mero\s+de\s+factura|n[ºo°.]?\s*factura|factura\s*(?:n[ºo°.]|#))\s*[:#-]?\s*([A-Z0-9][A-Z0-9\/_-]{2,})/gi;
-  const numberMatches = Array.from(text.matchAll(numberPattern));
-  const numberMatch = numberMatches.length ? numberMatches[0] : null;
-  const creditNumberMatch = creditNoteTerm ? ([String(fileName || ''), text].map(function (value) { return value.match(/\b(?:CN|NC)[-_\/]?\d[A-Z0-9\/_-]*/i); }).find(Boolean) || null) : null;
-  const invoiceNumber = creditNumberMatch ? creditNumberMatch[0] : numberMatch ? numberMatch[1] : '';
-  const distinctNumbers = numberMatches.map(function (match) { return normalizeText_(match[1]); }).filter(function (value, index, list) { return value && list.indexOf(value) === index; });
-  const dateMatch = text.match(/(?:fecha(?:\s+de\s+emisi[oó]n)?|invoice\s+date|date)\s*[:#-]?\s*(20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]20\d{2})/i);
-  const totalMatches = Array.from(text.matchAll(/(?:grand\s+total|importe\s+total|total\s+(?:a\s+pagar|factura|bruto)|amount\s+due)\s*[:€$]?\s*([\d.,]+)\s*(EUR|USD|GBP|€|\$)?/gi));
-  const totalMatch = totalMatches.length ? totalMatches[totalMatches.length - 1] : null;
-  const extractedTotal = totalMatch ? parseNumber_(totalMatch[1]) : null;
+  const historyMatch = providerFromHistory_(sender, providers);
+  const providerMatch = ruleMatch || historyMatch || providerFromDocument_(text, sender, fileName, providers);
+  const provider = providerMatch ? enrichProviderTaxId_(providerMatch.provider) : null;
+  const numberResult = extractInvoiceNumber_(text, fileName, !!creditNoteTerm);
+  const invoiceNumber = numberResult.value;
+  const distinctNumbers = numberResult.strongValues;
+  const dateResult = extractInvoiceDate_(text, fileName, emailDate);
+  const totalResult = extractInvoiceTotal_(text);
+  const extractedTotal = totalResult.value;
   const total = creditNoteTerm && extractedTotal !== null ? -Math.abs(extractedTotal) : extractedTotal;
-  const explicitCurrency = text.match(/\b(EUR|USD|GBP|CHF|PLN|CAD|AUD)\b/i);
-  const totalToken = totalMatch && totalMatch[2] ? totalMatch[2] : '';
-  const currency = totalToken === '€' ? 'EUR' : /^[A-Z]{3}$/i.test(totalToken) ? totalToken.toUpperCase() : explicitCurrency ? explicitCurrency[1].toUpperCase() : '';
-  const fields = { supplier: provider ? provider.name : '', supplierId: provider ? provider.id : '', taxId: provider ? provider.taxId : '', invoiceNumber: invoiceNumber, invoiceDate: dateMatch ? parseDate_(dateMatch[1]) : '', total: total, currency: currency };
+  const currency = inferInvoiceCurrency_(text, totalResult.currencyToken);
+  const fields = { supplier: provider ? provider.name : '', supplierId: provider ? provider.id : '', taxId: provider ? provider.taxId : '', invoiceNumber: invoiceNumber, invoiceDate: dateResult.value, total: total, currency: currency };
   if (creditNoteTerm) evidence.push({ field: 'documentType', value: 'NOTA DE CRÉDITO', source: 'PDF', excerpt: creditNoteTerm + (fileName ? ' · ' + fileName : '') });
-  if (provider) evidence.push({ field: 'supplier', value: provider.name, source: ruleMatch ? 'REGLA' : provider.domain && senderDomain.endsWith(provider.domain) ? 'CORREO' : 'PDF', excerpt: ruleMatch ? ruleMatch.evidence : provider.domain && senderDomain.endsWith(provider.domain) ? senderDomain : provider.name });
-  if (fields.invoiceNumber) evidence.push({ field: 'invoiceNumber', value: fields.invoiceNumber, source: 'PDF', excerpt: creditNumberMatch ? creditNumberMatch[0] : numberMatch[0] });
-  if (fields.invoiceDate) evidence.push({ field: 'invoiceDate', value: fields.invoiceDate, source: 'PDF', excerpt: dateMatch[0] });
-  if (total !== null) evidence.push({ field: 'total', value: total + ' ' + currency, source: 'PDF', excerpt: totalMatch[0] });
+  if (provider) evidence.push({ field: 'supplier', value: provider.name, source: providerMatch.source, excerpt: providerMatch.evidence });
+  if (fields.invoiceNumber) evidence.push({ field: 'invoiceNumber', value: fields.invoiceNumber, source: numberResult.source, excerpt: numberResult.excerpt });
+  if (fields.invoiceDate) evidence.push({ field: 'invoiceDate', value: fields.invoiceDate, source: dateResult.source, excerpt: dateResult.excerpt });
+  if (total !== null) evidence.push({ field: 'total', value: total + ' ' + currency, source: 'PDF', excerpt: totalResult.excerpt });
   const errors = [];
   if (rectificativeTerm && !creditNoteTerm) errors.push('Documento ' + rectificativeTerm + ': tratamiento contable pendiente');
   if (!creditNoteTerm && distinctNumbers.length > 1) errors.push('El PDF contiene varias facturas o números de factura distintos');
@@ -258,11 +264,147 @@ function classifyInvoiceText_(text, sender, subject, fileName) {
   return { status: errors.length ? 'REVISIÓN MANUAL' : 'PROCESADA', phase: errors.length ? 'EN REVISIÓN' : 'LISTO PARA APROBAR', reason: reason, fields: fields, evidence: evidence };
 }
 
+function isStrongInvoiceContext_(text, subject, fileName) {
+  const file = normalizeText_(String(fileName || '').replace(/\.pdf$/i, ''));
+  const header = normalizeText_(String(text || '').slice(0, 1400));
+  const subjectText = normalizeText_(subject || '');
+  return /^(?:factura|facture|fattura|invoice|avoir|credit note)\b/.test(file) || /\b(?:factura|facture|fattura|invoice|avoir|credit note|nota de credito)\s*(?:n|no|num|numero|number|#|[-_:])/.test(header) || /\b(?:factura|invoice|avoir|credit note)\b/.test(subjectText);
+}
+
+function senderEmail_(sender) {
+  const match = String(sender || '').toLowerCase().match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/);
+  return match ? match[0] : '';
+}
+
+function providerFromHistory_(sender, providers) {
+  const email = senderEmail_(sender);
+  if (!email) return null;
+  const counts = {};
+  getRows_(APP.SHEETS.INVOICES).forEach(function (row) {
+    if (String(row.ESTADO || '') !== 'PROCESADA' || senderEmail_(row.REMITENTE) !== email) return;
+    const name = String(row.PROVEEDOR || '');
+    if (name) counts[name] = (counts[name] || 0) + 1;
+  });
+  const winner = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; })[0];
+  if (!winner) return null;
+  const normalizedWinner = normalizeText_(winner);
+  const provider = providers.find(function (item) { return [item.name].concat(item.aliases || []).some(function (name) { return providerNamesOverlap_(normalizeText_(name), normalizedWinner); }); });
+  return provider ? { provider: provider, source: 'HISTÓRICO', evidence: email + ' · ' + counts[winner] + ' factura(s) procesada(s)' } : null;
+}
+
+function providerFromDocument_(text, sender, fileName, providers) {
+  const normalized = normalizeText_(text);
+  const senderDomainMatch = String(sender || '').toLowerCase().match(/@([a-z0-9.-]+)/);
+  const senderDomain = senderDomainMatch ? senderDomainMatch[1].replace(/[>\s].*$/, '') : '';
+  const file = normalizeText_(fileName || '');
+  const candidates = [];
+  providers.forEach(function (item) {
+    let score = 0;
+    let evidence = '';
+    if (item.domain && senderDomain && senderDomain.endsWith(String(item.domain).toLowerCase())) { score = 100; evidence = senderDomain; }
+    if (item.taxId && normalized.indexOf(normalizeText_(item.taxId)) !== -1 && score < 95) { score = 95; evidence = item.taxId; }
+    [item.name, String(item.name || '').split('(')[0]].concat(item.aliases || []).forEach(function (name) {
+      const needle = normalizeText_(name);
+      if (!needle || needle.length < 4) return;
+      if (file.indexOf(needle) !== -1 && score < 80) { score = 80; evidence = fileName; }
+      if (needle.length >= 8 && normalized.indexOf(needle) !== -1 && score < 60) { score = 60; evidence = name; }
+    });
+    if (score) candidates.push({ provider: item, score: score, source: score >= 95 ? 'CORREO/PDF' : 'PDF', evidence: evidence });
+  });
+  candidates.sort(function (a, b) { return b.score - a.score; });
+  return candidates.length && (!candidates[1] || candidates[0].score > candidates[1].score) ? candidates[0] : null;
+}
+
+function enrichProviderTaxId_(provider) {
+  if (!provider || provider.taxId) return provider;
+  const target = normalizeText_(provider.name);
+  const historical = getRows_(APP.SHEETS.INVOICES).find(function (row) { return String(row.ESTADO || '') === 'PROCESADA' && providerNamesOverlap_(normalizeText_(row.PROVEEDOR), target) && String(row.CIF_NIF || '').trim(); });
+  if (!historical) return provider;
+  const enriched = {};
+  Object.keys(provider).forEach(function (key) { enriched[key] = provider[key]; });
+  enriched.taxId = String(historical.CIF_NIF || '');
+  return enriched;
+}
+
+function providerNamesOverlap_(left, right) {
+  left = String(left || '').replace(/\bposible\b/g, '').replace(/\s+/g, ' ').trim();
+  right = String(right || '').replace(/\bposible\b/g, '').replace(/\s+/g, ' ').trim();
+  if (!left || !right) return false;
+  return left === right || (Math.min(left.length, right.length) >= 10 && (left.indexOf(right) === 0 || right.indexOf(left) === 0));
+}
+
+function addExtractionCandidate_(list, value, score, source, excerpt) {
+  const clean = String(value || '').trim().replace(/^[#:\s-]+|[.,;:\s]+$/g, '');
+  if (!clean || /^(?:fecha|date|factura|invoice|numero|number)$/i.test(clean)) return;
+  const existing = list.find(function (item) { return normalizeText_(item.value) === normalizeText_(clean); });
+  if (!existing || score > existing.score) {
+    if (existing) list.splice(list.indexOf(existing), 1);
+    list.push({ value: clean, score: score, source: source, excerpt: excerpt || clean });
+  }
+}
+
+function extractInvoiceNumber_(text, fileName, creditNote) {
+  const candidates = [];
+  const labelled = /(?:invoice\s*(?:number|no\.?|#)|n[uú]mero\s+(?:de\s+)?factura|n[ºo°.]?\s*(?:de\s+)?factura|factura\s*(?:n[ºo°.]|#|num(?:ero)?\.?|number)|facture\s*(?:n[ºo°.]|#)|numero\s+fattura|fattura\s*(?:n[ºo°.]|#))\s*[:#-]?\s*([A-Z0-9][A-Z0-9\/_-]{2,})/gi;
+  Array.from(String(text || '').matchAll(labelled)).forEach(function (match) { addExtractionCandidate_(candidates, match[1], 100, 'PDF', match[0]); });
+  const fileBase = String(fileName || '').replace(/\.pdf$/i, '');
+  const filePatterns = creditNote ? [/\b(?:CN|NC)[-_\/]?\d[A-Z0-9\/_-]*/i] : [/\b(?:INV|GOP|E\d{2}OR|FA|AS|A|S)[-_\/]?\d[A-Z0-9\/_-]*/i, /(?:factura|facture|fattura|invoice)[-_ ]+([A-Z0-9]+(?:[-_\/]\d[A-Z0-9\/_-]*)+)/i];
+  filePatterns.forEach(function (pattern) { const match = fileBase.match(pattern); if (match) addExtractionCandidate_(candidates, match[1] || match[0], 90, 'NOMBRE DE ARCHIVO', fileName); });
+  if (creditNote) { const match = [fileBase, String(text || '')].map(function (value) { return value.match(/\b(?:CN|NC)[-_\/]?\d[A-Z0-9\/_-]*/i); }).find(Boolean); if (match) addExtractionCandidate_(candidates, match[0], 110, 'NOMBRE DE ARCHIVO/PDF', match[0]); }
+  candidates.sort(function (a, b) { return b.score - a.score; });
+  const top = candidates[0] || { value: '', source: 'PDF', excerpt: '', score: 0 };
+  const strongValues = candidates.filter(function (item) { return item.score >= 100; }).map(function (item) { return normalizeText_(item.value); }).filter(function (value, index, list) { return value && list.indexOf(value) === index; });
+  return { value: top.value, source: top.source, excerpt: top.excerpt, confidence: top.score, strongValues: strongValues };
+}
+
+function extractInvoiceDate_(text, fileName, emailDate) {
+  const candidates = [];
+  const labelled = /(?:fecha(?:\s+(?:de\s+)?(?:emisi[oó]n|expedici[oó]n|factura))?|invoice\s+date|date\s+(?:de\s+facture|de\s+facturation|d['’]?[ée]mission)|data\s+(?:della\s+fattura|emissione)|date)\s*[:#-]?\s*(20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]20\d{2})/gi;
+  Array.from(String(text || '').matchAll(labelled)).forEach(function (match) { const value = parseDate_(match[1]); if (isPlausibleInvoiceDate_(value, emailDate)) candidates.push({ value: value, score: 100, source: 'PDF', excerpt: match[0] }); });
+  if (!candidates.length) {
+    const header = String(text || '').slice(0, 1600);
+    const dates = Array.from(header.matchAll(/\b(20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]20\d{2})\b/g));
+    const valid = dates.map(function (match) { return { value: parseDate_(match[1]), excerpt: match[0] }; }).filter(function (item) { return isPlausibleInvoiceDate_(item.value, emailDate); });
+    const unique = valid.filter(function (item, index, list) { return list.findIndex(function (other) { return other.value === item.value; }) === index; });
+    if (unique.length === 1) candidates.push({ value: unique[0].value, score: 70, source: 'PDF', excerpt: unique[0].excerpt });
+  }
+  candidates.sort(function (a, b) { return b.score - a.score; });
+  return candidates[0] || { value: '', score: 0, source: 'PDF', excerpt: '' };
+}
+
+function isPlausibleInvoiceDate_(value, emailDate) {
+  if (!value || !/^20\d{2}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(value + 'T12:00:00Z');
+  if (isNaN(date.getTime()) || date.getUTCFullYear() < 2018) return false;
+  const received = emailDate ? new Date(emailDate) : null;
+  return !received || isNaN(received.getTime()) || date.getTime() <= received.getTime() + 7 * 86400000;
+}
+
+function extractInvoiceTotal_(text) {
+  const candidates = [];
+  const pattern = /(?:grand\s+total|importe\s+total|total\s+(?:a\s+pagar|factura|bruto|con\s+impuestos)|amount\s+due|total\s+ttc|net\s+[aà]\s+payer|totale\s+(?:fattura|da\s+pagare)|total\s+due)\s*[:\s]*(?:EUR|USD|GBP|CHF|PLN|CAD|AUD|€|\$)?\s*([-+]?\d[\d., ]*)\s*(EUR|USD|GBP|CHF|PLN|CAD|AUD|€|\$)?/gi;
+  Array.from(String(text || '').matchAll(pattern)).forEach(function (match) {
+    const value = parseNumber_(match[1]);
+    if (value !== null) candidates.push({ value: value, currencyToken: match[2] || (match[0].indexOf('€') !== -1 ? '€' : ''), excerpt: match[0] });
+  });
+  return candidates.length ? candidates[candidates.length - 1] : { value: null, currencyToken: '', excerpt: '' };
+}
+
+function inferInvoiceCurrency_(text, token) {
+  const value = String(token || '').trim();
+  if (value === '€') return 'EUR';
+  if (/^[A-Z]{3}$/i.test(value)) return value.toUpperCase();
+  const explicit = String(text || '').match(/\b(EUR|USD|GBP|CHF|PLN|CAD|AUD)\b/i);
+  if (explicit) return explicit[1].toUpperCase();
+  return String(text || '').indexOf('€') !== -1 ? 'EUR' : '';
+}
+
 function providerFromRules_(text, sender, subject, providers) {
   const rows = getRows_(APP.SHEETS.RULES).filter(function (row) { return toBoolean_(row.ACTIVA); }).sort(function (a, b) { return Number(b.PRIORIDAD || 0) - Number(a.PRIORIDAD || 0); });
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
     const field = normalizeText_(row.CAMPO || 'pdf');
+    if (!/(?:proveedor|dominio|remitente|correo|asunto|pdf)/.test(field) || /(?:importe|total|numero|fecha|moneda)/.test(field)) continue;
     const pattern = String(row['TEXTO_O_PATRÓN'] || '').trim();
     if (!pattern) continue;
     const haystack = /dominio|remitente|correo/.test(field) ? String(sender || '') : /asunto/.test(field) ? String(subject || '') : String(text || '');
@@ -274,7 +416,7 @@ function providerFromRules_(text, sender, subject, providers) {
     if (!matches) continue;
     const providerName = normalizeText_(row.PROVEEDOR || '');
     const provider = providers.find(function (item) { return [item.name].concat(item.aliases || []).some(function (name) { return normalizeText_(name) === providerName; }); });
-    if (provider) return { provider: provider, evidence: String(row.CAMPO || 'PDF') + ': ' + pattern };
+    if (provider) return { provider: provider, source: 'REGLA', evidence: String(row.CAMPO || 'PDF') + ': ' + pattern };
   }
   return null;
 }
