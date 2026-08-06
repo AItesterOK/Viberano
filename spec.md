@@ -32,7 +32,6 @@ Esta feature incluye:
 - eliminar o modificar correos y adjuntos originales;
 - procesar facturas de venta emitidas por la empresa como gastos;
 - inventar o completar datos fiscales, dominios o contactos sin evidencia;
-- decidir el tratamiento contable definitivo de notas de crédito o abonos;
 - afirmar que una factura está pagada o impagada sin evidencia suficiente;
 - contabilizar, pagar o aprobar pagos a proveedores;
 - modificar el contenido de una factura;
@@ -72,10 +71,10 @@ Como responsable de administración, quiero obtener únicamente los datos respal
 
 **Escenarios de aceptación**:
 
-1. **Dado** una factura de gasto con proveedor, número, fecha, total positivo y moneda identificables, **Cuando** se extraen sus datos, **Entonces** todos los valores acreditados quedan asociados al documento.
+1. **Dado** una factura de gasto o nota de crédito con proveedor, número, fecha, total no nulo y moneda identificables, **Cuando** se extraen sus datos, **Entonces** todos los valores acreditados quedan asociados al documento y las notas de crédito conservan el importe negativo.
 2. **Dado** una factura en la que no aparece un CIF, NIF o VAT ID verificable, **Cuando** se extraen los datos, **Entonces** ese campo queda vacío y no se inventa ningún valor.
 3. **Dado** una factura sin número inequívoco, **Cuando** se valida para archivo, **Entonces** se registra como `REVISIÓN MANUAL` y no se archiva automáticamente.
-4. **Dado** una factura cuyo total no es numérico o no es superior a cero, **Cuando** se valida para archivo, **Entonces** se registra como `REVISIÓN MANUAL` con el motivo.
+4. **Dado** una factura cuyo total no es numérico o es cero, **Cuando** se valida para archivo, **Entonces** se registra como `REVISIÓN MANUAL` con el motivo; un importe negativo solo es válido si el documento acredita que es una nota de crédito o abono.
 5. **Dado** que el total y el subtotal aparecen en el mismo documento, **Cuando** se determina el importe de la factura, **Entonces** se utiliza el total final con impuestos incluidos.
 
 ### Historia de Usuario 3 - Identificar al proveedor sin inventar datos (Prioridad: P1)
@@ -137,7 +136,7 @@ Como responsable de administración, quiero revisar los documentos que no cumple
 
 1. **Dado** un documento con información insuficiente o contradictoria, **Cuando** no puede validarse con seguridad, **Entonces** queda en `REVISIÓN MANUAL` con un motivo concreto.
 2. **Dado** un documento en revisión, **Cuando** el responsable aporta o valida la información que faltaba, **Entonces** puede volver a evaluarse sin crear un registro duplicado.
-3. **Dado** una nota de crédito o un abono, **Cuando** se identifica su naturaleza, **Entonces** permanece en revisión hasta disponer de una política contable aprobada.
+3. **Dado** una nota de crédito o un abono con proveedor y campos acreditados, **Cuando** se valida, **Entonces** se archiva en la misma estructura de gastos con el importe negativo en el registro y en el nombre del PDF.
 4. **Dado** un documento rechazado como factura, **Cuando** se consulta el registro, **Entonces** se puede conocer la razón del descarte.
 
 ### Historia de Usuario 7 - Mantener un catálogo fiable de proveedores (Prioridad: P2)
@@ -258,7 +257,7 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 - **FR-029**: El sistema DEBE distinguir una factura no encontrada en los extractos aportados de una factura impagada.
 - **FR-030**: El sistema DEBE identificar los cargos bancarios relevantes para los que no exista una factura registrada.
 - **FR-031**: El reporte de conciliación DEBE indicar el periodo y las fuentes bancarias consideradas.
-- **FR-032**: El sistema DEBE detectar notas de crédito, abonos y facturas rectificativas, mantenerlas en `REVISIÓN MANUAL` y evitar su archivo o conciliación automática en esta primera versión.
+- **FR-032**: El sistema DEBE detectar notas de crédito y abonos, registrar su total como importe negativo y archivarlos en la misma estructura de gastos; las facturas rectificativas ambiguas permanecen en `REVISIÓN MANUAL`.
 - **FR-033**: El sistema DEBE detectar posibles conciliaciones de un pago contra varias facturas o de varios pagos contra una factura, mostrarlas como `REVISIÓN MANUAL` y evitar su confirmación automática en esta primera versión.
 - **FR-034**: El sistema DEBE iniciar el procesamiento únicamente por una acción expresa de una persona autorizada y no mediante ejecuciones programadas.
 - **FR-035**: El sistema DEBE exigir una identidad autorizada antes de mostrar datos o permitir acciones, atribuyendo cada decisión a la persona identificada.
@@ -282,7 +281,7 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 ### Resultados medibles
 
 - **SC-001**: El 100 % de los PDF revisados recibe un estado y, cuando corresponde, un motivo comprensible de revisión o descarte.
-- **SC-002**: El 100 % de las facturas marcadas como `PROCESADA` dispone de proveedor, número, fecha válida, importe total positivo y moneda acreditados.
+- **SC-002**: El 100 % de los documentos marcados como `PROCESADA` dispone de proveedor, número, fecha válida, importe no nulo y moneda acreditados; todo importe negativo corresponde a una nota de crédito o abono acreditado.
 - **SC-003**: Ninguna factura se archiva más de una vez dentro del histórico controlado.
 - **SC-004**: El 100 % de las facturas procesadas puede rastrearse hasta su archivo y hasta su correo de origen cuando la fuente proporcione esa referencia.
 - **SC-005**: Ningún documento dudoso, factura de venta o documento que no sea factura se incorpora automáticamente al archivo de gastos.
@@ -314,6 +313,6 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 
 ## Decisiones cerradas para la primera versión
 
-1. **Documentos rectificativos**: las notas de crédito, los abonos y las facturas rectificativas se detectan y permanecen en revisión manual; no se archivan ni concilian automáticamente.
+1. **Documentos rectificativos**: las notas de crédito y los abonos acreditados se archivan en gastos con importe negativo; las facturas rectificativas ambiguas permanecen en revisión manual.
 2. **Conciliaciones múltiples**: las relaciones uno-a-varios y varios-a-uno se señalan para revisión, pero solo se pueden confirmar coincidencias inequívocas uno-a-uno.
 3. **Operación**: no existen tareas programadas ni aprobaciones automáticas; una persona autorizada inicia el análisis y confirma cada escritura definitiva.

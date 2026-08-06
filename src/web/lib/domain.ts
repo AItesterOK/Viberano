@@ -29,12 +29,18 @@ export function invoiceIdentityKey(input: Pick<InvoiceDocument, 'supplier' | 'in
   return [normalizeText(input.supplier), normalizeText(input.invoiceNumber), input.invoiceDate, input.total?.toFixed(2) ?? '', input.currency.toUpperCase()].join('|');
 }
 
+export function isCreditNote(input: Pick<InvoiceDocument, 'originalName' | 'subject' | 'reviewReason' | 'evidence'>): boolean {
+  const context = normalizeText([input.originalName, input.subject, input.reviewReason, JSON.stringify(input.evidence)].join(' '));
+  return /(?:credit note|nota de credito|\babono\b|\bavoir\b)/.test(context);
+}
+
 export function validateInvoice(input: InvoiceDocument, activeSuppliers: Supplier[]): string[] {
   const errors: string[] = [];
+  const creditNote = isCreditNote(input);
   if (!input.supplier.trim()) errors.push('Proveedor ausente');
   if (!input.invoiceNumber.trim()) errors.push('Número de factura ausente');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.invoiceDate)) errors.push('Fecha de emisión inválida');
-  if (input.total === null || input.total <= 0) errors.push('Importe total inválido');
+  if (input.total === null || (creditNote ? input.total >= 0 : input.total <= 0)) errors.push('Importe total inválido');
   if (!/^[A-Z]{3}$/.test(input.currency)) errors.push('Moneda no identificada');
   const supplier = activeSuppliers.find((item) => item.active && (item.id === input.supplierId || normalizeText(item.name) === normalizeText(input.supplier)));
   if (!supplier) errors.push('Proveedor desconocido o inactivo');

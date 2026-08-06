@@ -101,6 +101,17 @@ function normalizeText_(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+function isCreditNoteDocument_(document, reason) {
+  const context = [document && (document.NOMBRE_ORIGINAL || document.originalName), document && (document.ASUNTO || document.subject), document && (document.MOTIVO_REVISION || document.reviewReason), reason, document && (document.EVIDENCIA_JSON || JSON.stringify(document.evidence || []))].join(' ');
+  return /(?:credit note|nota de credito|\babono\b|\bavoir\b)/.test(normalizeText_(context));
+}
+
+function isValidInvoiceAmount_(value, document, reason) {
+  const amount = Number(value);
+  const creditNote = isCreditNoteDocument_(document, reason);
+  return isFinite(amount) && (creditNote ? amount < 0 : amount > 0);
+}
+
 function safeJsonParse_(value, fallback) {
   try { return value ? JSON.parse(value) : fallback; } catch (_) { return fallback; }
 }

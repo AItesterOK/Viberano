@@ -11,7 +11,7 @@ function saveDocumentReview_(payload, user, requestId) {
     if (!provider) errors.push('Proveedor desconocido o inactivo');
     if (!String(input.invoiceNumber || '').trim()) errors.push('Número de factura ausente');
     if (!parseDate_(input.invoiceDate)) errors.push('Fecha inválida');
-    if (input.total === null || Number(input.total) <= 0) errors.push('Importe inválido');
+    if (input.total === null || !isValidInvoiceAmount_(input.total, input, payload.reason)) errors.push('Importe inválido; las notas de crédito deben estar acreditadas y tener importe negativo');
     if (!/^[A-Z]{3}$/.test(String(input.currency || ''))) errors.push('Moneda inválida');
   }
   const keepInReview = input.proposedStatus === 'REVISIÓN MANUAL';
@@ -104,7 +104,7 @@ function validateFinalInvoice_(row) {
   if (!providers.some(function (provider) { return provider.id === String(row.PROVEEDOR_ID); })) throw appError_('INVALID_SUPPLIER', 'El proveedor no está activo.');
   if (!String(row.NUMERO_FACTURA || '').trim()) throw appError_('INVALID_INVOICE', 'Falta número de factura.');
   if (!parseDate_(row.FECHA_FACTURA)) throw appError_('INVALID_INVOICE', 'Fecha de factura inválida.');
-  if (Number(row.IMPORTE_TOTAL || 0) <= 0) throw appError_('INVALID_INVOICE', 'Importe total inválido.');
+  if (!isValidInvoiceAmount_(row.IMPORTE_TOTAL, row)) throw appError_('INVALID_INVOICE', 'Importe total inválido; las notas de crédito deben estar acreditadas y tener importe negativo.');
   if (!/^[A-Z]{3}$/.test(String(row.MONEDA || ''))) throw appError_('INVALID_INVOICE', 'Moneda inválida.');
   const key = invoiceAccountingKey_(row);
   const duplicate = getRows_(APP.SHEETS.INVOICES).find(function (item) { return invoiceAccountingKey_(item) === key; });

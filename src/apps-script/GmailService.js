@@ -176,7 +176,7 @@ function analyzeAttachment_(batchId, messageId, attachment, metadata, sourceKey,
   let decision;
   try {
     extracted = ocrPdf_(bytes, attachment.filename);
-    decision = duplicate ? { status: 'DUPLICADO IGNORADO', phase: 'LISTO PARA APROBAR', reason: 'La huella SHA-256 ya existe en el registro', fields: {}, evidence: [{ field: 'duplicate', value: hash, source: 'PDF', excerpt: 'Coincidencia exacta de bytes' }] } : classifyInvoiceText_(extracted.text, metadata.sender, metadata.subject);
+    decision = duplicate ? { status: 'DUPLICADO IGNORADO', phase: 'LISTO PARA APROBAR', reason: 'La huella SHA-256 ya existe en el registro', fields: {}, evidence: [{ field: 'duplicate', value: hash, source: 'PDF', excerpt: 'Coincidencia exacta de bytes' }] } : classifyInvoiceText_(extracted.text, metadata.sender, metadata.subject, attachment.filename);
   } catch (error) {
     decision = { status: 'REVISIÓN MANUAL', phase: 'EN REVISIÓN', reason: 'No se pudo extraer texto fiable: ' + (error.message || error), fields: {}, evidence: [] };
   } finally {
@@ -203,8 +203,9 @@ function ocrPdf_(bytes, fileName) {
   return { text: text, tempId: created.id };
 }
 
-function classifyInvoiceText_(text, sender, subject) {
+function classifyInvoiceText_(text, sender, subject, fileName) {
   const normalized = normalizeText_(text);
+  const documentContext = normalizeText_([fileName || '', subject || '', text].join('\n'));
   const evidence = [];
   const negative = ['presupuesto', 'propuesta comercial', 'propuesta de servicio', 'albaran', 'nota de entrega', 'shipment slip', 'confirmacion de pedido', 'etiqueta de devolucion'];
   const invoiceSignals = ['factura', 'invoice', 'tax invoice', 'numero de factura', 'invoice number', 'iva', 'vat', 'importe total', 'grand total', 'amount due'];
@@ -215,7 +216,8 @@ function classifyInvoiceText_(text, sender, subject) {
   const reparaProAsIssuer = /reparapro[\s\S]{0,180}(?:cif|nif|vat)[\s:#-]*(?:es)?b09740036/.test(normalized.slice(0, 700));
   if (reparaProAsIssuer && !reparaProAsBuyer && /factura|invoice/.test(normalized)) return { status: 'FACTURA DE VENTA', phase: 'LISTO PARA APROBAR', reason: 'Documento emitido por ReparaPRO', fields: {}, evidence: [{ field: 'issuer', value: 'ReparaPRO', source: 'PDF', excerpt: 'CIF de ReparaPRO acreditado como emisor' }] };
   if (signalHits.length < 3) return { status: 'REVISIÓN MANUAL', phase: 'EN REVISIÓN', reason: 'No hay señales suficientes para identificar una factura', fields: {}, evidence: [{ field: 'classification', value: signalHits.join(', '), source: 'PDF', excerpt: 'Señales detectadas insuficientes' }] };
-  const complex = ['factura rectificativa', 'rectificativa', 'credit note', 'nota de credito', 'abono', 'corrective invoice'].find(function (term) { return normalized.indexOf(term) !== -1; });
+  const creditNoteTerm = ['credit note', 'nota de credito', 'abono', 'avoir'].find(function (term) { return documentContext.indexOf(term) !== -1; });
+  const rectificativeTerm = ['factura rectificativa', 'rectificativa', 'corrective invoice'].find(function (term) { return documentContext.indexOf(term) !== -1; });
   const providers = activeProviders_();
   const domainMatch = String(sender || '').toLowerCase().match(/@([a-z0-9.-]+)/);
   const senderDomain = domainMatch ? domainMatch[1].replace(/[>\s].*$/, '') : '';
@@ -227,28 +229,33 @@ function classifyInvoiceText_(text, sender, subject) {
   const numberPattern = /(?:invoice\s*(?:number|no\.?|#)|n[uú]mero\s+de\s+factura|n[ºo°.]?\s*factura|factura\s*(?:n[ºo°.]|#))\s*[:#-]?\s*([A-Z0-9][A-Z0-9\/_-]{2,})/gi;
   const numberMatches = Array.from(text.matchAll(numberPattern));
   const numberMatch = numberMatches.length ? numberMatches[0] : null;
+  const creditNumberMatch = creditNoteTerm ? ([String(fileName || ''), text].map(function (value) { return value.match(/\b(?:CN|NC)[-_\/]?\d[A-Z0-9\/_-]*/i); }).find(Boolean) || null) : null;
+  const invoiceNumber = creditNumberMatch ? creditNumberMatch[0] : numberMatch ? numberMatch[1] : '';
   const distinctNumbers = numberMatches.map(function (match) { return normalizeText_(match[1]); }).filter(function (value, index, list) { return value && list.indexOf(value) === index; });
   const dateMatch = text.match(/(?:fecha(?:\s+de\s+emisi[oó]n)?|invoice\s+date|date)\s*[:#-]?\s*(20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]20\d{2})/i);
   const totalMatches = Array.from(text.matchAll(/(?:grand\s+total|importe\s+total|total\s+(?:a\s+pagar|factura|bruto)|amount\s+due)\s*[:€$]?\s*([\d.,]+)\s*(EUR|USD|GBP|€|\$)?/gi));
   const totalMatch = totalMatches.length ? totalMatches[totalMatches.length - 1] : null;
-  const total = totalMatch ? parseNumber_(totalMatch[1]) : null;
+  const extractedTotal = totalMatch ? parseNumber_(totalMatch[1]) : null;
+  const total = creditNoteTerm && extractedTotal !== null ? -Math.abs(extractedTotal) : extractedTotal;
   const explicitCurrency = text.match(/\b(EUR|USD|GBP|CHF|PLN|CAD|AUD)\b/i);
   const totalToken = totalMatch && totalMatch[2] ? totalMatch[2] : '';
   const currency = totalToken === '€' ? 'EUR' : /^[A-Z]{3}$/i.test(totalToken) ? totalToken.toUpperCase() : explicitCurrency ? explicitCurrency[1].toUpperCase() : '';
-  const fields = { supplier: provider ? provider.name : '', supplierId: provider ? provider.id : '', taxId: provider ? provider.taxId : '', invoiceNumber: numberMatch ? numberMatch[1] : '', invoiceDate: dateMatch ? parseDate_(dateMatch[1]) : '', total: total, currency: currency };
+  const fields = { supplier: provider ? provider.name : '', supplierId: provider ? provider.id : '', taxId: provider ? provider.taxId : '', invoiceNumber: invoiceNumber, invoiceDate: dateMatch ? parseDate_(dateMatch[1]) : '', total: total, currency: currency };
+  if (creditNoteTerm) evidence.push({ field: 'documentType', value: 'NOTA DE CRÉDITO', source: 'PDF', excerpt: creditNoteTerm + (fileName ? ' · ' + fileName : '') });
   if (provider) evidence.push({ field: 'supplier', value: provider.name, source: ruleMatch ? 'REGLA' : provider.domain && senderDomain.endsWith(provider.domain) ? 'CORREO' : 'PDF', excerpt: ruleMatch ? ruleMatch.evidence : provider.domain && senderDomain.endsWith(provider.domain) ? senderDomain : provider.name });
-  if (fields.invoiceNumber) evidence.push({ field: 'invoiceNumber', value: fields.invoiceNumber, source: 'PDF', excerpt: numberMatch[0] });
+  if (fields.invoiceNumber) evidence.push({ field: 'invoiceNumber', value: fields.invoiceNumber, source: 'PDF', excerpt: creditNumberMatch ? creditNumberMatch[0] : numberMatch[0] });
   if (fields.invoiceDate) evidence.push({ field: 'invoiceDate', value: fields.invoiceDate, source: 'PDF', excerpt: dateMatch[0] });
   if (total !== null) evidence.push({ field: 'total', value: total + ' ' + currency, source: 'PDF', excerpt: totalMatch[0] });
   const errors = [];
-  if (complex) errors.push('Documento ' + complex + ': tratamiento contable pendiente');
-  if (distinctNumbers.length > 1) errors.push('El PDF contiene varias facturas o números de factura distintos');
+  if (rectificativeTerm && !creditNoteTerm) errors.push('Documento ' + rectificativeTerm + ': tratamiento contable pendiente');
+  if (!creditNoteTerm && distinctNumbers.length > 1) errors.push('El PDF contiene varias facturas o números de factura distintos');
   if (!provider) errors.push('Proveedor desconocido o inactivo' + (senderDomain ? ' (' + senderDomain + ')' : ''));
   if (!fields.invoiceNumber) errors.push('Número de factura ausente o ambiguo');
   if (!fields.invoiceDate) errors.push('Fecha de emisión ausente o inválida');
-  if (total === null || total <= 0) errors.push('Importe total ausente o inválido');
+  if (total === null || total === 0) errors.push('Importe total ausente o inválido');
   if (!currency) errors.push('Moneda ausente o ambigua');
-  return { status: errors.length ? 'REVISIÓN MANUAL' : 'PROCESADA', phase: errors.length ? 'EN REVISIÓN' : 'LISTO PARA APROBAR', reason: errors.join('; '), fields: fields, evidence: evidence };
+  const reason = errors.length ? errors.join('; ') : creditNoteTerm ? 'Nota de crédito acreditada; se archivará en gastos con importe negativo.' : '';
+  return { status: errors.length ? 'REVISIÓN MANUAL' : 'PROCESADA', phase: errors.length ? 'EN REVISIÓN' : 'LISTO PARA APROBAR', reason: reason, fields: fields, evidence: evidence };
 }
 
 function providerFromRules_(text, sender, subject, providers) {

@@ -63,6 +63,17 @@ test('mantiene y resuelve una excepción aunque el lote pueda cerrarse', async (
   await expect(page.getByText('factura-demo-lista.pdf').first()).toBeVisible();
 });
 
+test('prepara una nota de crédito con importe negativo antes de guardarla', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Revisión/ }).first().click();
+  const amount = page.getByLabel('Total con impuestos');
+  const creditDecision = page.getByRole('button', { name: 'Nota de crédito', exact: true });
+  await creditDecision.click();
+  await expect(creditDecision).toHaveAttribute('aria-pressed', 'true');
+  await expect(amount).toHaveValue('-88.42');
+  await expect(page.getByText(/Nota de crédito\. Se aplicará al guardar\./)).toBeVisible();
+});
+
 test('fusiona proveedores de forma reversible sin borrar el histórico', async ({ page }) => {
   await page.goto('/');
   if ((page.viewportSize()?.width ?? 1200) < 860) {

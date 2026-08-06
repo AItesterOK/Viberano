@@ -84,6 +84,19 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(invoice).toContain("SELECCIONADO: phase === 'LISTO PARA APROBAR'");
   });
 
+  it('archiva notas de crédito acreditadas con importe negativo', () => {
+    const gmail = source('GmailService.js');
+    const invoice = source('InvoiceService.js');
+    const core = source('Core.js');
+    expect(gmail).toContain("const total = creditNoteTerm && extractedTotal !== null ? -Math.abs(extractedTotal) : extractedTotal");
+    expect(gmail).toContain("value: 'NOTA DE CRÉDITO'");
+    expect(gmail).toContain("'Nota de crédito acreditada; se archivará en gastos con importe negativo.'");
+    expect(core).toContain('function isCreditNoteDocument_');
+    expect(core).toContain('creditNote ? amount < 0 : amount > 0');
+    expect(invoice).toContain('isValidInvoiceAmount_(input.total, input, payload.reason)');
+    expect(invoice).toContain('isValidInvoiceAmount_(row.IMPORTE_TOTAL, row)');
+  });
+
   it('acota el historial enviado durante el arranque', () => {
     const api = source('Api.js');
     expect(api).toContain("safeRows_(APP.SHEETS.LOG).slice(-50).reverse()");

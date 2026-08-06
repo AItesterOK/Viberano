@@ -21,6 +21,14 @@ describe('reglas documentales', () => {
     expect(validateInvoice({ ...document, invoiceNumber: '', total: 0 }, mockSuppliers)).toEqual(expect.arrayContaining(['Número de factura ausente', 'Importe total inválido']));
   });
 
+  it('acepta notas de crédito acreditadas y conserva el importe negativo en el nombre', () => {
+    const credit = { id: 'cn', batchId: 'b', messageId: 'm', originalName: 'avoir-CN-5003713.pdf', sender: '', subject: 'Credit note', emailDate: '', invoiceDate: '2026-07-21', supplier: 'Componentes Demo Europa BV', supplierId: 'sup-europa', taxId: '', invoiceNumber: 'CN-5003713', total: -21.5, currency: 'EUR', phase: 'LISTO PARA APROBAR', proposedStatus: 'PROCESADA', reviewReason: 'Nota de crédito acreditada', evidence: [{ field: 'documentType', value: 'NOTA DE CRÉDITO', source: 'PDF', excerpt: 'avoir' }], hash: 'h-cn', selected: true } as import('../src/web/types').InvoiceDocument;
+    expect(validateInvoice(credit, mockSuppliers)).toEqual([]);
+    expect(formatInvoiceFileName(credit)).toBe('2026-07-21 - Componentes Demo Europa BV - -21.50 EUR - CN-5003713.pdf');
+    expect(validateInvoice({ ...credit, total: 21.5 }, mockSuppliers)).toContain('Importe total inválido');
+    expect(validateInvoice({ ...credit, originalName: 'documento.pdf', subject: '', reviewReason: '', evidence: [] }, mockSuppliers)).toContain('Importe total inválido');
+  });
+
   it('forma una identidad contable estable', () => {
     const a = { supplier: 'Próveedor Demo', invoiceNumber: 'DEMO / 01', invoiceDate: '2026-07-01', total: 10, currency: 'eur' };
     const b = { ...a, supplier: 'Proveedor-Demo', currency: 'EUR' };
