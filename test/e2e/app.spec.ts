@@ -30,6 +30,23 @@ test('expone revisión humana, proveedores y conciliación sin declarar impagos'
   await expect(page.getByText(/impagada/i)).toHaveCount(0);
 });
 
+test('crea y asocia un proveedor desde el documento sin aprobar la factura', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Revisión/ }).first().click();
+  await page.getByRole('button', { name: /factura-demo-revision\.pdf/ }).click();
+  await page.getByRole('button', { name: 'Crear proveedor desde este PDF' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Crear proveedor desde este documento' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel('Nombre canónico')).toHaveValue('Proveedor Nuevo Demo SL');
+  await expect(dialog.getByLabel('Dominio confirmado')).toHaveValue('proveedor-demo.invalid');
+  await dialog.getByLabel('CIF / NIF').fill('B00000999');
+  await dialog.getByText('He comprobado los datos').click();
+  await dialog.getByRole('button', { name: 'Crear y asociar' }).click();
+  await expect(page.getByRole('dialog', { name: 'Crear proveedor desde este documento' })).toBeHidden();
+  await expect(page.getByLabel('Proveedor', { exact: true })).toHaveValue(/sup-/);
+  await expect(page.getByRole('button', { name: 'Aprobar documento' })).toBeHidden();
+});
+
 test('mantiene y resuelve una excepción aunque el lote pueda cerrarse', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Revisión/ }).first().click();

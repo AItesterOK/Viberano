@@ -56,6 +56,12 @@ function apiSaveSupplier(payload) {
     if (!String(input.evidence || '').trim()) throw appError_('SUPPLIER_EVIDENCE_REQUIRED', 'La evidencia es obligatoria.');
     const rows = safeRows_(APP.SHEETS.PROVIDERS);
     const existing = rows.find(function (row) { return String(row.ID_PROVEEDOR || ('legacy-' + row.__row)) === String(input.id || ''); });
+    const duplicate = !existing && rows.find(function (row) {
+      const sameName = normalizeText_(row.PROVEEDOR) === normalizeText_(input.name);
+      const sameTaxId = String(input.taxId || '').trim() && String(row.CIF_NIF || '').trim().toUpperCase() === String(input.taxId).trim().toUpperCase();
+      return sameName || sameTaxId;
+    });
+    if (duplicate) throw appError_('SUPPLIER_ALREADY_EXISTS', 'Ya existe un proveedor con el mismo nombre o CIF/NIF. Asócialo desde el selector o fusiona los registros.', false, { supplierId: String(duplicate.ID_PROVEEDOR || ('legacy-' + duplicate.__row)) });
     const id = existing ? String(existing.ID_PROVEEDOR || ('legacy-' + existing.__row)) : (String(input.id || '') || 'SUP-' + uuid_());
     const data = { PROVEEDOR: String(input.name).trim(), DOMINIO: String(input.domain || '').trim().toLowerCase(), CIF_NIF: String(input.taxId || '').trim().toUpperCase(), TIPO: 'Factura de gasto', ACTIVO: input.active !== false, OBSERVACIONES: String(input.evidence), ID_PROVEEDOR: id, ALIASES: (input.aliases || []).join('; '), EVIDENCIA: String(input.evidence), FECHA_ACTUALIZACION: nowIso_(), ACTUALIZADO_POR: user, REQUEST_ID: requestId };
     const before = existing ? providerFromRow_(existing) : null;

@@ -106,6 +106,13 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(mergeSource).not.toContain("APP.SHEETS.INVOICES, row.__row");
   });
 
+  it('impide crear proveedores duplicados por nombre o CIF', () => {
+    const api = source('Api.js');
+    expect(api).toContain("appError_('SUPPLIER_ALREADY_EXISTS'");
+    expect(api).toContain('normalizeText_(row.PROVEEDOR) === normalizeText_(input.name)');
+    expect(api).toContain("String(row.CIF_NIF || '').trim().toUpperCase()");
+  });
+
   it('no inventa moneda y conserva compatibilidad con REGLAS', () => {
     const gmail = source('GmailService.js');
     expect(gmail).toContain("if (!currency) errors.push('Moneda ausente o ambigua')");
