@@ -135,6 +135,14 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(source('InvoiceService.js')).not.toContain("MONEDA: row.MONEDA || 'EUR'");
   });
 
+  it('vacía los campos contables de los documentos que no son facturas de gasto', () => {
+    const invoice = source('InvoiceService.js');
+    expect(invoice).toContain("const keepAccountingFields = proposed === 'PROCESADA' || proposed === 'REVISIÓN MANUAL'");
+    expect(invoice).toContain("FECHA_FACTURA: keepAccountingFields ? parseDate_(input.invoiceDate) : ''");
+    expect(invoice).toContain("IMPORTE_TOTAL: keepAccountingFields && Number.isFinite(Number(row.IMPORTE_TOTAL)) ? Number(row.IMPORTE_TOTAL) : ''");
+    expect(invoice).toContain("PROVEEDOR: keepAccountingFields ? row.PROVEEDOR || '' : ''");
+  });
+
   it('elimina la conversión OCR también cuando falla la lectura', () => {
     const gmail = source('GmailService.js');
     const failureCleanup = "if (!text && lastError) { try { DriveApp.getFileById(created.id).setTrashed(true); }";
@@ -158,9 +166,9 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(gmail).not.toContain("String(batchRow.FECHA_DESDE) + 'T00:00:00+02:00'");
     expect(data).toContain('invoiceDate: parseDate_(row.FECHA_FACTURA)');
     expect(data).toContain('date: parseDate_(row.FECHA_FACTURA)');
-    expect(invoice).toContain('FECHA_FACTURA: parseDate_(input.invoiceDate)');
+    expect(invoice).toContain("FECHA_FACTURA: keepAccountingFields ? parseDate_(input.invoiceDate) : ''");
     expect(invoice).toContain('const invoiceDate = parseDate_(row.FECHA_FACTURA)');
-    expect(invoice).toContain('FECHA_FACTURA: parseDate_(row.FECHA_FACTURA)');
+    expect(invoice).toContain("FECHA_FACTURA: keepAccountingFields ? parseDate_(row.FECHA_FACTURA) : ''");
     expect(core).toContain("const parts = parseDate_(dateText).split('-').map(Number)");
   });
 
