@@ -27,6 +27,16 @@ function appendObject_(name, object) {
   return sheet.getLastRow();
 }
 
+function appendObjects_(name, objects) {
+  if (!objects || !objects.length) return [];
+  const sheet = sheet_(name);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  const firstRow = sheet.getLastRow() + 1;
+  const values = objects.map(function (object) { return headers.map(function (header) { return object[header] === undefined ? '' : object[header]; }); });
+  sheet.getRange(firstRow, 1, values.length, headers.length).setValues(values);
+  return values.map(function (_, index) { return firstRow + index; });
+}
+
 function updateObjectRow_(name, rowNumber, updates) {
   const sheet = sheet_(name);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
@@ -34,6 +44,29 @@ function updateObjectRow_(name, rowNumber, updates) {
   const values = range.getValues()[0];
   headers.forEach(function (header, index) { if (Object.prototype.hasOwnProperty.call(updates, header)) values[index] = updates[header]; });
   range.setValues([values]);
+}
+
+function updateObjectRows_(name, changes) {
+  if (!changes || !changes.length) return;
+  const sheet = sheet_(name);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  const ordered = changes.slice().sort(function (a, b) { return Number(a.rowNumber) - Number(b.rowNumber); });
+  const groups = [];
+  ordered.forEach(function (change) {
+    const rowNumber = Number(change.rowNumber);
+    const current = groups[groups.length - 1];
+    if (!current || rowNumber !== current.end + 1) groups.push({ start: rowNumber, end: rowNumber, changes: [change] });
+    else { current.end = rowNumber; current.changes.push(change); }
+  });
+  groups.forEach(function (group) {
+    const range = sheet.getRange(group.start, 1, group.end - group.start + 1, headers.length);
+    const values = range.getValues();
+    group.changes.forEach(function (change) {
+      const row = values[Number(change.rowNumber) - group.start];
+      headers.forEach(function (header, index) { if (Object.prototype.hasOwnProperty.call(change.updates, header)) row[index] = change.updates[header]; });
+    });
+    range.setValues(values);
+  });
 }
 
 function ensureSheetHeaders_(name, expected) {
@@ -95,9 +128,11 @@ function setupSchema_(user, requestId) {
 
 function logEvent_(level, action, objectId, detail, data, batchId, requestId, explicitUser) {
   const user = explicitUser || getActiveEmail_() || getEffectiveEmail_() || 'sistema';
-  appendObject_(APP.SHEETS.LOG, {
-    FECHA_HORA: nowIso_(), NIVEL: level, 'ACCIÓN': action, DOCUMENTO: objectId || '', DETALLE: detail || '', DATOS_JSON: JSON.stringify(data || {}), USUARIO: user, LOTE_ID: batchId || '', ID_EVENTO: requestId || uuid_(),
-  });
+  appendObjects_(APP.SHEETS.LOG, [logEventObject_(level, action, objectId, detail, data, batchId, requestId, user)]);
+}
+
+function logEventObject_(level, action, objectId, detail, data, batchId, requestId, user) {
+  return { FECHA_HORA: nowIso_(), NIVEL: level, 'ACCIÓN': action, DOCUMENTO: objectId || '', DETALLE: detail || '', DATOS_JSON: JSON.stringify(data || {}), USUARIO: user || 'sistema', LOTE_ID: batchId || '', ID_EVENTO: requestId || uuid_() };
 }
 
 function activeProviders_() {

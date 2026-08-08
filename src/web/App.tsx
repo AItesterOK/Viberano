@@ -527,9 +527,12 @@ function ReconciliationMatrix({ snapshot, updateSnapshot }: PageProps) {
   const movement = bankImport?.movements.find((item) => item.id === movementId);
   const invoice = snapshot.invoices.find((item) => item.id === invoiceId);
   const allocated = Number(amount || 0);
-  const total = direction === 'MOVEMENT' ? Math.abs(movement?.amount ?? 0) : Math.abs(invoice?.total ?? 0);
-  const alreadyAssigned = direction === 'MOVEMENT' ? Math.abs(movement?.assignedAmount ?? 0) : Math.abs(invoice?.assignedAmount ?? 0);
-  const difference = total - alreadyAssigned - Math.abs(allocated);
+  const totalCents = Math.round(Math.abs(direction === 'MOVEMENT' ? movement?.amount ?? 0 : invoice?.total ?? 0) * 100);
+  const alreadyAssignedCents = Math.round(Math.abs(direction === 'MOVEMENT' ? movement?.assignedAmount ?? 0 : invoice?.assignedAmount ?? 0) * 100);
+  const allocatedCents = Math.round(Math.abs(allocated) * 100);
+  const total = totalCents / 100;
+  const alreadyAssigned = alreadyAssignedCents / 100;
+  const difference = (totalCents - alreadyAssignedCents - allocatedCents) / 100;
   const save = async () => {
     if (!bankImport || !movement || !invoice || allocated <= 0) { setMessage('Selecciona movimiento, factura e importe asignado.'); return; }
     setWorking(true); setMessage('');

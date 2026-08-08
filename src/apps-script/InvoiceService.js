@@ -13,6 +13,8 @@ function saveDocumentReviews_(payload, user, requestId) {
   const providers = activeProviders_();
   const invoices = getRows_(APP.SHEETS.INVOICES);
   const providerCounts = invoices.reduce(function (map, invoice) { if (String(invoice.ESTADO || '') === 'PROCESADA') { const key = normalizeText_(invoice.PROVEEDOR || ''); map[key] = (map[key] || 0) + 1; } return map; }, {});
+  const rowChanges = [];
+  const auditEvents = [];
   const results = items.map(function (item) {
     const input = item.document || {};
     const row = rows.find(function (candidate) { return String(candidate.DOCUMENTO_ID) === String(input.id); });
@@ -33,19 +35,25 @@ function saveDocumentReviews_(payload, user, requestId) {
       evidence.push({ field: 'manualDecision', value: classification, source: 'MANUAL', excerpt: reason });
       if (input.nonRegularSupplier) evidence.push({ field: 'supplierFrequency', value: 'PROVEEDOR NO HABITUAL', source: 'MANUAL', excerpt: provider ? history + ' factura(s) histórica(s) procesada(s)' : 'Proveedor no reconocido en el catálogo' });
       const updatedAt = nowIso_();
-      updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, {
+      const updates = {
         FECHA_FACTURA: keepAccounting ? parseDate_(input.invoiceDate) : '', FECHA_OPERACION: keepAccounting ? parseDate_(input.operationDate) : '', FECHA_VENCIMIENTO: keepAccounting ? parseDate_(input.dueDate) : '', CATEGORIA_ID: keepAccounting ? String(input.categoryId || '') : '', BASE_IMPONIBLE: keepAccounting && input.taxableBase !== null && input.taxableBase !== undefined ? Number(input.taxableBase) : '', IMPUESTOS_JSON: keepAccounting ? JSON.stringify(input.taxLines || []) : '[]', NOTA_INTERNA: keepAccounting ? String(input.internalNote || '') : '',
         PROVEEDOR: keepAccounting ? (provider ? provider.name : input.supplier || '') : '', PROVEEDOR_ID: keepAccounting && provider ? provider.id : '', CIF_NIF: keepAccounting ? input.taxId || '' : '', NUMERO_FACTURA: keepAccounting ? input.invoiceNumber || '' : '', IMPORTE_TOTAL: keepAccounting && input.total !== null && isFinite(Number(input.total)) ? Number(input.total) : '', MONEDA: keepAccounting ? String(input.currency || '').toUpperCase() : '', FASE: phase, ESTADO_PROPUESTO: classification, MOTIVO_REVISION: errors.join('; '), MOTIVO_DECISION: reason, ERRORES_VALIDACION_JSON: JSON.stringify(errors), EVIDENCIA_JSON: JSON.stringify(evidence), SELECCIONADO: phase === 'LISTO PARA APROBAR', PROVEEDOR_NO_HABITUAL: keepAccounting && Boolean(input.nonRegularSupplier), ACTUALIZADO_EN: updatedAt, ACTUALIZADO_POR: user, REQUEST_ID: decisionId,
-      });
-      Object.assign(row, { FECHA_FACTURA: keepAccounting ? parseDate_(input.invoiceDate) : '', FECHA_OPERACION: keepAccounting ? parseDate_(input.operationDate) : '', FECHA_VENCIMIENTO: keepAccounting ? parseDate_(input.dueDate) : '', CATEGORIA_ID: keepAccounting ? String(input.categoryId || '') : '', BASE_IMPONIBLE: keepAccounting && input.taxableBase !== null && input.taxableBase !== undefined ? Number(input.taxableBase) : '', IMPUESTOS_JSON: keepAccounting ? JSON.stringify(input.taxLines || []) : '[]', NOTA_INTERNA: keepAccounting ? String(input.internalNote || '') : '', PROVEEDOR: keepAccounting ? (provider ? provider.name : input.supplier || '') : '', PROVEEDOR_ID: keepAccounting && provider ? provider.id : '', CIF_NIF: keepAccounting ? input.taxId || '' : '', NUMERO_FACTURA: keepAccounting ? input.invoiceNumber || '' : '', IMPORTE_TOTAL: keepAccounting && input.total !== null && isFinite(Number(input.total)) ? Number(input.total) : '', MONEDA: keepAccounting ? String(input.currency || '').toUpperCase() : '', FASE: phase, ESTADO_PROPUESTO: classification, MOTIVO_REVISION: errors.join('; '), MOTIVO_DECISION: reason, ERRORES_VALIDACION_JSON: JSON.stringify(errors), EVIDENCIA_JSON: JSON.stringify(evidence), SELECCIONADO: phase === 'LISTO PARA APROBAR', PROVEEDOR_NO_HABITUAL: keepAccounting && Boolean(input.nonRegularSupplier), ACTUALIZADO_EN: updatedAt, ACTUALIZADO_POR: user, REQUEST_ID: decisionId });
-      logEvent_('INFO', 'DOCUMENTO_REVISADO', input.id, reason, { classification: classification, validationErrors: errors }, String(row.LOTE_ID || ''), decisionId, user);
+      };
+      rowChanges.push({ rowNumber: row.__row, updates: updates });
+      Object.assign(row, updates);
+      auditEvents.push(logEventObject_('INFO', 'DOCUMENTO_REVISADO', input.id, reason, { classification: classification, validationErrors: errors }, String(row.LOTE_ID || ''), decisionId, user));
       return { documentId: String(input.id), ok: true, ready: phase === 'LISTO PARA APROBAR', document: documentFromRow_(row) };
     } catch (error) {
       return { documentId: String(input.id || ''), ok: false, ready: false, error: { code: error.code || 'SERVER_ERROR', message: error.message || String(error), retryable: Boolean(error.retryable) } };
     }
   });
-  const response = { items: results, saved: results.filter(function (item) { return item.ok; }).length, failed: results.filter(function (item) { return !item.ok; }).length, durationMs: Date.now() - started };
-  logEvent_('INFO', 'REVISION_MASIVA_GUARDADA', '', response.saved + ' guardadas; ' + response.failed + ' fallidas', { count: items.length, durationMs: response.durationMs }, '', requestId, user);
+  updateObjectRows_(APP.SHEETS.DOCUMENTS, rowChanges);
+  const saved = results.filter(function (item) { return item.ok; }).length;
+  const failed = results.filter(function (item) { return !item.ok; }).length;
+  const writeDurationMs = Date.now() - started;
+  auditEvents.push(logEventObject_('INFO', 'REVISION_MASIVA_GUARDADA', '', saved + ' guardadas; ' + failed + ' fallidas', { count: items.length, durationMs: writeDurationMs }, '', requestId, user));
+  appendObjects_(APP.SHEETS.LOG, auditEvents);
+  const response = { items: results, saved: saved, failed: failed, durationMs: Date.now() - started };
   return response;
 }
 
