@@ -210,15 +210,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .preview-error a { color: inherit; font-weight: 700; text-decoration: underline; }
 .review-detail .evidence-chain { margin-bottom: 22px; }
 .review-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; }
-.supplier-association { display: grid; align-content: start; gap: 4px; }
+.supplier-association { display: grid; align-content: start; gap: 6px; }
 .supplier-association .button { min-height: 28px; padding: 4px 2px; justify-content: flex-start; font-size: 9px; }
-.supplier-frequency-control { margin-top: 16px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--control); display: grid; gap: 14px; }
+.supplier-frequency-control { padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--control); display: grid; gap: 10px; }
 .supplier-frequency-control.is-selected { border-color: rgba(0, 98, 255, .28); background: var(--info-bg); }
-.supplier-frequency-control > label { display: flex; align-items: flex-start; gap: 11px; cursor: pointer; }
-.supplier-frequency-control input[type="checkbox"] { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--repara-blue); flex: 0 0 auto; }
+.supplier-frequency-control > label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.supplier-frequency-control input[type="checkbox"] { width: 16px; height: 16px; margin: 1px 0 0; accent-color: var(--repara-blue); flex: 0 0 auto; }
 .supplier-frequency-control label > span { min-width: 0; display: grid; gap: 4px; }
-.supplier-frequency-control strong { color: var(--ink-primary); font-size: 10px; }
-.supplier-frequency-control small { color: var(--ink-secondary); font-size: 9px; line-height: 1.45; }
+.supplier-frequency-control strong { color: var(--ink-primary); font-size: 9px; line-height: 1.35; }
+.supplier-frequency-control small { color: var(--ink-secondary); font-size: 8px; line-height: 1.45; }
 .supplier-frequency-tag { width: fit-content; margin-top: 5px; padding: 3px 6px; border-radius: 5px; background: var(--warning-bg); color: var(--warning); display: inline-flex; font-size: 8px; font-weight: 800; letter-spacing: .025em; text-transform: uppercase; }
 .source-evidence-card { padding: 12px; border: 1px solid rgba(0, 98, 255, .12); border-radius: var(--radius-sm); background: var(--info-bg); display: flex; align-items: flex-start; gap: 10px; }
 .source-evidence-card > span { width: 30px; height: 30px; border-radius: 8px; background: var(--paper); color: var(--repara-blue); display: grid; place-items: center; flex: 0 0 auto; }

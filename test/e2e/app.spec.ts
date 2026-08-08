@@ -36,8 +36,10 @@ test('marca y valida una factura de proveedor no habitual sin crear un proveedor
   await page.goto('/');
   await page.getByRole('button', { name: /Revisión/ }).first().click();
   await page.getByRole('button', { name: /factura-demo-revision\.pdf/ }).click();
-  const frequency = page.getByLabel('Marcar como proveedor no habitual');
+  const supplierAssociation = page.locator('.supplier-association');
+  const frequency = supplierAssociation.getByLabel('Marcar como proveedor no habitual');
   await expect(frequency).toBeVisible();
+  await expect(supplierAssociation.getByRole('button', { name: 'Crear proveedor desde este PDF' })).toBeVisible();
   await frequency.check();
   await expect(page.getByLabel('Nombre del proveedor en la factura')).toHaveValue('Proveedor Nuevo Demo SL');
   await page.getByRole('button', { name: 'Factura de gasto', exact: true }).click();
@@ -58,6 +60,7 @@ test('muestra la mesa operativa y navega por el flujo documental', async ({ page
   await page.getByRole('button', { name: 'Abrir detalle' }).first().click();
   await expect(page.getByRole('heading', { name: 'Revisión manual' })).toBeVisible();
   await expect(page.getByText('factura-demo-lista.pdf').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Previsualizar PDF' })).toBeVisible();
 });
 
 test('expone revisión humana, proveedores y conciliación sin declarar impagos', async ({ page }) => {
