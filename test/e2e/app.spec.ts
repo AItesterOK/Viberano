@@ -54,7 +54,7 @@ test('muestra la mesa operativa y navega por el flujo documental', async ({ page
   await expect(page.getByText('Fuentes conectadas y preparadas')).toBeVisible();
   await page.getByRole('button', { name: /Procesamiento|Procesar/ }).first().click();
   await expect(page.getByRole('heading', { name: 'Analizar y aprobar un lote' })).toBeVisible();
-  await expect(page.getByLabel('Desde')).toHaveValue('2026-07-18');
+  await expect(page.getByLabel('Desde')).toHaveValue('2026-01-01');
   await expect(page.getByText('Siguiente fecha de búsqueda: 01 ago 2026')).toBeVisible();
   await expect(page.getByText('factura-demo-lista.pdf')).toBeVisible();
   await page.getByRole('button', { name: 'Abrir detalle' }).first().click();

@@ -13,8 +13,8 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(source('Api.js')).toContain('triggerDiagnosticAvailable: triggers !== null');
   });
 
-  it('fija la continuación cronológica en el 18 de julio de 2026', () => {
-    expect(source('Config.js')).toContain("START_DATE: '2026-07-18'");
+  it('fija la cobertura cronológica desde el 1 de enero de 2026', () => {
+    expect(source('Config.js')).toContain("START_DATE: '2026-01-01'");
     expect(source('GmailService.js')).toContain('const minimumDate = effectiveStartDate_(config)');
     expect(source('Data.js')).toContain('configured < APP.START_DATE ? APP.START_DATE : configured');
   });
