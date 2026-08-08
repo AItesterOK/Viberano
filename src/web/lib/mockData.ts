@@ -76,7 +76,7 @@ export const mockBankImport: BankImport = {
 export function createMockSnapshot(): AppSnapshot {
   const metrics = buildMonthlyMetrics(mockInvoices, new Date('2026-07-31T12:00:00Z'));
   return {
-    settings: { mode: 'DRY_RUN', user, effectiveUser: user, allowedUsers: [user], timezone: 'Europe/Madrid', spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: 20, sliceSize: 5, startDate: '2026-07-18', services: { gmail: true, drive: true, sheets: true } },
+    settings: { mode: 'DRY_RUN', user, effectiveUser: user, allowedUsers: [user], timezone: 'Europe/Madrid', spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: 20, sliceSize: 5, startDate: '2026-01-01', services: { gmail: true, drive: true, sheets: true } },
     activeBatch: mockBatch,
     reviewDocuments: [reviewDocument],
     invoices: mockInvoices,
