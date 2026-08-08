@@ -265,11 +265,16 @@ describe('contrato de seguridad de Apps Script', () => {
   it('guarda hasta 20 revisiones bajo un único bloqueo y conserva conflictos por documento', () => {
     const api = source('Api.js');
     const invoice = source('InvoiceService.js');
+    const data = source('Data.js');
     expect(api).toContain('function apiSaveDocumentReviews');
     expect(api).toContain('saveDocumentReviews_(payload, user, requestId); }, { lock: true })');
     expect(invoice).toContain("slice(0, 20)");
     expect(invoice).toContain("appError_('REVIEW_CONFLICT'");
     expect(invoice).toContain('validationErrors: errors');
+    expect(invoice).toContain('updateObjectRows_(APP.SHEETS.DOCUMENTS, rowChanges)');
+    expect(invoice).toContain('appendObjects_(APP.SHEETS.LOG, auditEvents)');
+    expect(data).toContain('function updateObjectRows_');
+    expect(data).toContain('function appendObjects_');
   });
 
   it('soporta conciliación múltiple, parcial, exclusión justificada y deshacer', () => {
@@ -280,6 +285,8 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(bank).toContain('function saveReconciliationException_');
     expect(bank).toContain("ESTADO_CONCILIACION: 'EXCLUIDA CON MOTIVO'");
     expect(bank).toContain('function undoReconciliation_');
+    expect(bank).toContain('const assignedCents =');
+    expect(bank).toContain('Math.abs(totalCents - assignedCents) <= 1');
   });
 
   it('crea categorías, cierre y exportación idempotente para gestoría', () => {
@@ -292,6 +299,7 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(close).toContain("'GENERAR_EXPORTACION_GESTORIA'");
     expect(close).toContain('String(row.REQUEST_ID) === String(requestId)');
     expect(close).toContain('splitBlobs_(blobs, 35 * 1024 * 1024)');
+    expect(close).toContain('sum.totalCents += toCents_(invoice.total)');
   });
 
   it('pagina facturas, banco e historial sin cargar el histórico completo al arrancar', () => {

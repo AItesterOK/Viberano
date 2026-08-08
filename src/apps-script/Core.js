@@ -118,6 +118,8 @@ function safeJsonParse_(value, fallback) {
 
 function toBoolean_(value) { return value === true || String(value).toUpperCase() === 'TRUE'; }
 
+function toCents_(value) { return Math.round(Number(value || 0) * 100); }
+
 function base64UrlDecode_(value) {
   if (Array.isArray(value)) return value;
   const text = String(value || '').replace(/\s+/g, '');
