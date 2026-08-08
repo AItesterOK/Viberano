@@ -1,5 +1,26 @@
 import { expect, test } from '@playwright/test';
 
+test('alinea los estados conectados dentro del diagnóstico de fuentes', async ({ page }) => {
+  await page.goto('/');
+  if ((page.viewportSize()?.width ?? 1200) < 860) {
+    await page.getByRole('button', { name: /Más/ }).click();
+    await page.getByRole('button', { name: 'Configuración' }).last().click();
+  } else {
+    await page.getByRole('button', { name: 'Configuración' }).first().click();
+  }
+  const service = page.locator('.service-grid > div').first();
+  const status = service.locator('.status');
+  await expect(status).toBeVisible();
+  const geometry = await status.evaluate((element) => {
+    const statusBox = element.getBoundingClientRect();
+    const serviceBox = element.parentElement!.getBoundingClientRect();
+    return { alignItems: getComputedStyle(element).alignItems, width: statusBox.width, inside: statusBox.right <= serviceBox.right && statusBox.left >= serviceBox.left };
+  });
+  expect(geometry.alignItems).toBe('center');
+  expect(geometry.width).toBeGreaterThan(60);
+  expect(geometry.inside).toBe(true);
+});
+
 test('previsualiza el PDF de una factura con campos sin reconocer', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Revisi/ }).first().click();

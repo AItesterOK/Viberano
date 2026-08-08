@@ -353,7 +353,9 @@ td small { display: block; margin-top: 3px; color: var(--ink-muted); font-size: 
 .schema-callout p { margin: 3px 0 0; color: var(--ink-secondary); font-size: 8px; line-height: 1.4; }
 .service-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
 .service-grid > div { padding: 12px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); display: grid; grid-template-columns: 30px 1fr auto; gap: 9px; align-items: center; }
-.service-grid > div > span { width: 30px; height: 30px; border-radius: 50%; background: var(--success-bg); color: var(--success); display: grid; place-items: center; }
+.service-grid > div > span:first-child { width: 30px; height: 30px; border-radius: 50%; background: var(--success-bg); color: var(--success); display: grid; place-items: center; }
+.service-grid > div > div { min-width: 0; }
+.service-grid > div > .status { justify-self: end; }
 .service-grid strong { font-size: 9px; }
 .service-grid p { margin: 2px 0 0; color: var(--ink-tertiary); font-size: 8px; }
 
