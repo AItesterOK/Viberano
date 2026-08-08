@@ -69,6 +69,15 @@ export interface InvoiceDocument {
   selected: boolean;
 }
 
+export interface DocumentPreview {
+  id: string;
+  originalName: string;
+  mimeType: 'application/pdf';
+  base64: string;
+  size: number;
+  gmailUrl?: string;
+}
+
 export interface Batch {
   id: string;
   status: BatchStatus;

@@ -32,8 +32,8 @@ export function Field({ label, hint, children }: PropsWithChildren<{ label: stri
   return <div className="field"><label className="field__label" htmlFor={controlId}>{label}</label>{control}{hint && <span className="field__hint" id={hintId}>{hint}</span>}</div>;
 }
 
-export function Modal({ title, onClose, children, footer }: PropsWithChildren<{ title: string; onClose: () => void; footer?: ReactNode }>) {
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && onClose()}><section className="modal" role="dialog" aria-modal="true" aria-label={title}><header><h2>{title}</h2><button className="icon-button" aria-label="Cerrar" onClick={onClose}><Icon name="close"/></button></header><div className="modal__body">{children}</div>{footer && <footer>{footer}</footer>}</section></div>;
+export function Modal({ title, onClose, children, footer, size = 'default' }: PropsWithChildren<{ title: string; onClose: () => void; footer?: ReactNode; size?: 'default' | 'wide' }>) {
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && onClose()}><section className={`modal modal--${size}`} role="dialog" aria-modal="true" aria-label={title}><header><h2>{title}</h2><button className="icon-button" aria-label="Cerrar" onClick={onClose}><Icon name="close"/></button></header><div className="modal__body">{children}</div>{footer && <footer>{footer}</footer>}</section></div>;
 }
 
 export function EvidenceChain({ active = 3 }: { active?: number }) {

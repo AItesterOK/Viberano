@@ -236,4 +236,15 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(core).toContain("'DESACTIVAR_AUTOMATIZACION_ANTIGUA'");
     expect(core).toContain('ScriptApp.deleteTrigger(trigger)');
   });
+
+  it('previsualiza el adjunto original sin guardarlo ni modificar Gmail', () => {
+    const api = source('Api.js');
+    const previewStart = api.indexOf('function apiGetDocumentPreview');
+    const previewEnd = api.indexOf('function apiGetMetrics', previewStart);
+    const preview = api.slice(previewStart, previewEnd);
+    expect(preview).toContain("Gmail.Users.Messages.Attachments.get('me', messageId, attachmentId)");
+    expect(preview).toContain('maxPreviewBytes = 8 * 1024 * 1024');
+    expect(preview).toContain('Utilities.base64Encode(bytes)');
+    expect(preview).not.toMatch(/DriveApp|Drive\.Files|appendObject_|updateObjectRow_/);
+  });
 });

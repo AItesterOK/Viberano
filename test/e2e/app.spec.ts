@@ -1,5 +1,16 @@
 import { expect, test } from '@playwright/test';
 
+test('previsualiza el PDF de una factura con campos sin reconocer', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Revisi/ }).first().click();
+  await page.getByRole('button', { name: /factura-demo-revision\.pdf/ }).click();
+  await page.getByRole('button', { name: 'Previsualizar PDF' }).click();
+  const dialog = page.getByRole('dialog', { name: /Vista previa · factura-demo-revision\.pdf/ });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTitle('PDF factura-demo-revision.pdf')).toBeVisible();
+  await expect(dialog.getByRole('link', { name: /Abrir en otra pesta/ })).toBeVisible();
+});
+
 test('muestra la mesa operativa y navega por el flujo documental', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Qué necesita atención hoy' })).toBeVisible();

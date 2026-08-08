@@ -42,7 +42,27 @@ function apiListBatches() { return withApi_(null, function () { return safeRows_
 function apiGetBatch(payload) { return withApi_(payload, function () { const row = safeRows_(APP.SHEETS.BATCHES).find(function (item) { return String(item.LOTE_ID) === String(payload.batchId); }); if (!row) throw appError_('BATCH_NOT_FOUND', 'No se encuentra el lote.'); return batchFromRow_(row); }); }
 function apiListDocuments(payload) { return withApi_(payload, function () { const rows = safeRows_(APP.SHEETS.DOCUMENTS).filter(function (row) { return !payload || !payload.phase || String(row.FASE) === String(payload.phase); }); return rows.slice(-Math.min(Number(payload && payload.limit || 200), 500)).reverse().map(documentFromRow_); }); }
 function apiGetDocument(payload) { return withApi_(payload, function () { const row = safeRows_(APP.SHEETS.DOCUMENTS).find(function (item) { return String(item.DOCUMENTO_ID) === String(payload.documentId); }); if (!row) throw appError_('DOCUMENT_NOT_FOUND', 'No se encuentra el documento.'); return documentFromRow_(row); }); }
-function apiGetDocumentPreview(payload) { return withApi_(payload, function () { const row = safeRows_(APP.SHEETS.DOCUMENTS).find(function (item) { return String(item.DOCUMENTO_ID) === String(payload.documentId); }); if (!row) throw appError_('DOCUMENT_NOT_FOUND', 'No se encuentra el documento.'); return { id: String(row.DOCUMENTO_ID), originalName: String(row.NOMBRE_ORIGINAL || ''), gmailUrl: String(row.GMAIL_URL || ''), driveUrl: String(row.URL_DRIVE || ''), evidence: safeJsonParse_(row.EVIDENCIA_JSON, []).slice(0, 20) }; }); }
+function apiGetDocumentPreview(payload) {
+  return withApi_(payload, function () {
+    const row = safeRows_(APP.SHEETS.DOCUMENTS).find(function (item) { return String(item.DOCUMENTO_ID) === String(payload.documentId); });
+    if (!row) throw appError_('DOCUMENT_NOT_FOUND', 'No se encuentra el documento.');
+    const messageId = String(row.MESSAGE_ID || '');
+    const attachmentId = String(row.ATTACHMENT_ID || '');
+    if (!messageId || !attachmentId) throw appError_('PREVIEW_SOURCE_MISSING', 'Este documento histórico no conserva la referencia del adjunto. Ábrelo desde el correo de origen.');
+    const raw = Gmail.Users.Messages.Attachments.get('me', messageId, attachmentId);
+    const bytes = base64UrlDecode_(raw && raw.data);
+    const maxPreviewBytes = 8 * 1024 * 1024;
+    if (bytes.length > maxPreviewBytes) throw appError_('PREVIEW_TOO_LARGE', 'El PDF supera 8 MB. Ábrelo desde el correo de origen para revisarlo.');
+    return {
+      id: String(row.DOCUMENTO_ID),
+      originalName: String(row.NOMBRE_ORIGINAL || 'documento.pdf'),
+      mimeType: 'application/pdf',
+      base64: Utilities.base64Encode(bytes),
+      size: bytes.length,
+      gmailUrl: String(row.GMAIL_URL || ''),
+    };
+  });
+}
 function apiGetMetrics() { return withApi_(null, function () { return buildMetrics_(safeRows_(APP.SHEETS.INVOICES).map(invoiceFromRow_)); }); }
 function apiListAudit(payload) { return withApi_(payload, function () { const limit = Math.min(Math.max(Number(payload && payload.limit || 100), 1), 500); return safeRows_(APP.SHEETS.LOG).slice(-limit).reverse(); }); }
 function apiExportSuppliers() { return withApi_(null, function () { return safeRows_(APP.SHEETS.PROVIDERS).map(function (row) { return { PROVEEDOR: String(row.PROVEEDOR || ''), DOMINIO: String(row.DOMINIO || ''), CIF_NIF: String(row.CIF_NIF || '') }; }); }); }

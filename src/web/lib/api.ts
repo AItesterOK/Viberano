@@ -1,4 +1,4 @@
-import type { ApiResult, AppSnapshot, BankImport, Batch, InvoiceDocument, Supplier } from '../types';
+import type { ApiResult, AppSnapshot, BankImport, Batch, DocumentPreview, InvoiceDocument, Supplier } from '../types';
 import { createMockSnapshot } from './mockData';
 import { buildMonthlyMetrics, validateInvoice } from './domain';
 
@@ -86,6 +86,19 @@ export const api = {
     mock.activeBatch = { ...mock.activeBatch!, documents: mock.activeBatch!.documents.map((item) => item.id === updated.id ? updated : item) };
     mock.reviewDocuments = mock.reviewDocuments.map((item) => item.id === updated.id ? updated : item);
     return ok(structuredClone(updated));
+  },
+
+  async getDocumentPreview(document: InvoiceDocument): Promise<ApiResult<DocumentPreview>> {
+    if (serverAvailable()) return callServer<DocumentPreview>('apiGetDocumentPreview', { documentId: document.id });
+    await delay();
+    return ok({
+      id: document.id,
+      originalName: document.originalName,
+      mimeType: 'application/pdf',
+      base64: 'JVBERi0xLjQKJcTl8uXrCg==',
+      size: 16,
+      gmailUrl: document.gmailUrl,
+    });
   },
 
   async approveDocument(documentId: string): Promise<ApiResult<InvoiceDocument>> {

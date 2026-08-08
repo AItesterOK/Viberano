@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AppSnapshot, BankImport, InvoiceDocument, InvoiceRecord, Supplier } from './types';
+import type { AppSnapshot, BankImport, DocumentPreview, InvoiceDocument, InvoiceRecord, Supplier } from './types';
 import { api } from './lib/api';
 import { csvEscape, formatInvoiceFileName, invoiceArchivePath, metricsAverages } from './lib/domain';
 import { Icon, type IconName } from './components/Icon';
@@ -175,6 +175,19 @@ function activeReviewDecision(document: InvoiceDocument) {
   return reviewDecisions.find((decision) => decision.status === document.proposedStatus && (decision.status !== 'PROCESADA' || Boolean(decision.creditNote) === Boolean(document.total !== null && document.total < 0)));
 }
 
+function needsDocumentPreview(document: InvoiceDocument) {
+  if (document.phase === 'EN REVISIÓN' || document.phase === 'ERROR') return true;
+  if (document.proposedStatus !== 'PROCESADA') return false;
+  return !document.supplierId || !document.taxId.trim() || !document.invoiceNumber.trim() || !document.invoiceDate || document.total === null || !/^[A-Z]{3}$/.test(document.currency);
+}
+
+function pdfObjectUrl(preview: DocumentPreview) {
+  const binary = window.atob(preview.base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return URL.createObjectURL(new Blob([bytes], { type: preview.mimeType }));
+}
+
 function supplierDraftFromDocument(document: InvoiceDocument): Supplier {
   const detectedName = /^(sin proveedor|sin asociar)$/i.test(document.supplier.trim()) ? '' : document.supplier.trim();
   const sourceParts = [`PDF ${document.originalName}`, `correo recibido de ${document.sender}`];
@@ -193,6 +206,10 @@ function ReviewPage({ snapshot, updateSnapshot }: PageProps) {
   const [supplierConfirmed, setSupplierConfirmed] = useState(false);
   const [supplierSaving, setSupplierSaving] = useState(false);
   const [supplierError, setSupplierError] = useState('');
+  const [preview, setPreview] = useState<{ name: string; url: string; gmailUrl?: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
+  useEffect(() => () => { if (preview?.url) URL.revokeObjectURL(preview.url); }, [preview?.url]);
   const syncDocument = (document: InvoiceDocument) => {
     const activeBatch = snapshot.activeBatch ? { ...snapshot.activeBatch, documents: snapshot.activeBatch.documents.map((item) => item.id === document.id ? document : item) } : null;
     const reviewDocuments = snapshot.reviewDocuments.some((item) => item.id === document.id) ? snapshot.reviewDocuments.map((item) => item.id === document.id ? document : item) : [document, ...snapshot.reviewDocuments];
@@ -235,11 +252,23 @@ function ReviewPage({ snapshot, updateSnapshot }: PageProps) {
       setReason(reviewDocuments[0]?.reviewReason ?? '');
     } else setActionError(result.error?.message ?? 'No se pudo finalizar el documento');
   };
+  const openPreview = async () => {
+    if (!selected || previewLoading) return;
+    setPreviewLoading(true); setPreviewError('');
+    const result = await api.getDocumentPreview(selected);
+    setPreviewLoading(false);
+    if (!result.ok || !result.data) { setPreviewError(result.error?.message ?? 'No se pudo cargar la vista previa del PDF.'); return; }
+    try {
+      setPreview({ name: result.data.originalName, url: pdfObjectUrl(result.data), gmailUrl: result.data.gmailUrl });
+    } catch (_) {
+      setPreviewError('El navegador no pudo preparar el PDF. Ábrelo desde el correo de origen.');
+    }
+  };
   return <>
     <SectionHeader eyebrow="Control humano" title="Revisión manual" description="Los casos dudosos permanecen aquí aunque el lote original ya se haya cerrado, hasta que exista una decisión explícita."/>
     {!docs.length ? <EmptyState icon="check" title="No hay revisiones pendientes">Los resultados finalizados siguen disponibles desde Facturas.</EmptyState> : <section className="review-layout">
       <div className="review-list"><div className="list-toolbar"><strong>{docs.length} pendientes</strong><button><Icon name="search" size={17}/> Filtrar</button></div>{docs.map((doc) => <button key={doc.id} className={selected?.id === doc.id ? 'is-active' : ''} onClick={() => { setSelected(doc); setReason(doc.reviewReason); setActionError(''); }}><span className="file-token"><Icon name="file"/></span><div><strong>{doc.originalName}</strong><p>{doc.supplier}</p><small>{doc.reviewReason}</small></div><Icon name="chevron" size={17}/></button>)}</div>
-      {selected && <div className="review-detail"><div className="review-detail__head"><div><p className="eyebrow">Documento · {selected.id}</p><h2>{selected.originalName}</h2><p>{selected.subject}</p><small className="mail-route"><strong>{selected.emailDirection || 'ENTRANTE'}</strong> · De: {selected.sender}{selected.recipients ? ` · Para: ${selected.recipients}` : ''}</small></div><a className="button button--secondary" href={selected.gmailUrl} target="_blank" rel="noreferrer"><Icon name="mail" size={17}/>Abrir correo</a></div><EvidenceChain active={3}/>
+      {selected && <div className="review-detail"><div className="review-detail__head"><div><p className="eyebrow">Documento · {selected.id}</p><h2>{selected.originalName}</h2><p>{selected.subject}</p><small className="mail-route"><strong>{selected.emailDirection || 'ENTRANTE'}</strong> · De: {selected.sender}{selected.recipients ? ` · Para: ${selected.recipients}` : ''}</small></div><div className="review-detail__source-actions">{needsDocumentPreview(selected) && <Button variant="secondary" icon="eye" disabled={previewLoading} onClick={openPreview}>{previewLoading ? 'Cargando PDF…' : 'Previsualizar PDF'}</Button>}<a className="button button--secondary" href={selected.gmailUrl} target="_blank" rel="noreferrer"><Icon name="mail" size={17}/>Abrir correo</a></div></div>{previewError && <p className="inline-note preview-error" role="alert"><Icon name="warning" size={16}/><span>{previewError} {selected.gmailUrl && <a href={selected.gmailUrl} target="_blank" rel="noreferrer">Abrir correo</a>}</span></p>}<EvidenceChain active={3}/>
         <div className="review-grid"><div className="supplier-association"><Field label="Proveedor"><select value={selected.supplierId ?? ''} onChange={(e) => { const supplier = snapshot.suppliers.find((item) => item.id === e.target.value); setSelected({ ...selected, supplierId: supplier?.id, supplier: supplier?.name ?? selected.supplier, taxId: supplier?.taxId || selected.taxId }); }}><option value="">Sin asociar</option>{snapshot.suppliers.filter((item) => item.active).map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></Field>{!selected.supplierId && <Button variant="quiet" icon="plus" onClick={() => { setSupplierDraft(supplierDraftFromDocument(selected)); setSupplierConfirmed(false); setSupplierError(''); }}>Crear proveedor desde este PDF</Button>}</div><Field label="CIF / NIF"><input value={selected.taxId} onChange={(e) => setSelected({ ...selected, taxId: e.target.value })}/></Field><Field label="Número de factura"><input value={selected.invoiceNumber} onChange={(e) => setSelected({ ...selected, invoiceNumber: e.target.value })}/></Field><Field label="Fecha de emisión"><input type="date" value={selected.invoiceDate} onChange={(e) => setSelected({ ...selected, invoiceDate: e.target.value })}/></Field><Field label="Total con impuestos" hint="En notas de crédito se guarda y archiva como importe negativo"><input type="number" step="0.01" value={selected.total ?? ''} onChange={(e) => setSelected({ ...selected, total: e.target.value ? Number(e.target.value) : null })}/></Field><Field label="Moneda"><input maxLength={3} value={selected.currency} onChange={(e) => setSelected({ ...selected, currency: e.target.value.toUpperCase() })}/></Field></div>
         <div className="evidence-panel"><h3>Evidencia extraída</h3>{selected.evidence.map((item, index) => <div key={`${item.field}-${index}`}><span>{item.source}</span><div><strong>{item.field}: {item.value}</strong><p>“{item.excerpt}”</p></div></div>)}</div>
         <Field label="Motivo de la decisión" hint="Obligatorio en toda corrección o reclasificación"><textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)}/></Field>
@@ -249,6 +278,7 @@ function ReviewPage({ snapshot, updateSnapshot }: PageProps) {
         <div className="review-actions"><Button icon="refresh" disabled={saving} onClick={save}>{saving ? 'Guardando…' : 'Guardar decisión'}</Button>{selected.phase === 'LISTO PARA APROBAR' && <Button icon="check" onClick={approve}>Aprobar documento</Button>}</div>
       </div>}
     </section>}
+    {preview && <Modal title={`Vista previa · ${preview.name}`} size="wide" onClose={() => setPreview(null)} footer={<><a className="button button--secondary" href={preview.url} target="_blank" rel="noreferrer"><Icon name="eye" size={17}/>Abrir en otra pestaña</a>{preview.gmailUrl && <a className="button button--secondary" href={preview.gmailUrl} target="_blank" rel="noreferrer"><Icon name="mail" size={17}/>Ver correo de origen</a>}<Button onClick={() => setPreview(null)}>Cerrar</Button></>}><div className="pdf-preview"><iframe title={`PDF ${preview.name}`} src={preview.url}/><p>Si el PDF no aparece en el visor, ábrelo en otra pestaña o consulta el correo de origen.</p></div></Modal>}
     {supplierDraft && selected && <Modal title="Crear proveedor desde este documento" onClose={() => !supplierSaving && setSupplierDraft(null)} footer={<><Button variant="secondary" disabled={supplierSaving} onClick={() => setSupplierDraft(null)}>Cancelar</Button><Button icon="check" disabled={supplierSaving || !supplierConfirmed || !supplierDraft.name.trim() || !supplierDraft.evidence.trim()} onClick={createSupplier}>{supplierSaving ? 'Creando…' : 'Crear y asociar'}</Button></>}><div className="form-stack"><div className="source-evidence-card"><span><Icon name="search" size={18}/></span><div><strong>Fuente de los datos</strong><p>{selected.originalName} · {selected.sender}</p><small>La factura no se aprobará al crear el proveedor.</small></div></div><Field label="Nombre canónico"><input autoFocus value={supplierDraft.name} onChange={(e) => setSupplierDraft({ ...supplierDraft, name: e.target.value })}/></Field><div className="form-grid"><Field label="Dominio confirmado"><input placeholder="ejemplo.com" value={supplierDraft.domain} onChange={(e) => setSupplierDraft({ ...supplierDraft, domain: e.target.value.toLowerCase() })}/></Field><Field label="CIF / NIF"><input value={supplierDraft.taxId} onChange={(e) => setSupplierDraft({ ...supplierDraft, taxId: e.target.value.toUpperCase() })}/></Field></div><Field label="Aliases acreditados" hint="Marcas o nombres comerciales que aparecen en el PDF o correo; separados por punto y coma"><input value={supplierDraft.aliases.join('; ')} onChange={(e) => setSupplierDraft({ ...supplierDraft, aliases: e.target.value.split(';').map((value) => value.trim()).filter(Boolean) })}/></Field><Field label="Evidencia" hint="Indica documento, número de factura o fragmento donde aparecen el nombre y los datos fiscales"><textarea rows={3} value={supplierDraft.evidence} onChange={(e) => setSupplierDraft({ ...supplierDraft, evidence: e.target.value })}/></Field><label className="evidence-confirmation"><input type="checkbox" checked={supplierConfirmed} onChange={(e) => setSupplierConfirmed(e.target.checked)}/><span><strong>He comprobado los datos</strong><small>El nombre, dominio, CIF/NIF y aliases introducidos aparecen en el PDF o en el correo.</small></span></label>{supplierError && <p className="inline-note"><Icon name="error" size={16}/>{supplierError}</p>}</div></Modal>}
   </>;
 }
