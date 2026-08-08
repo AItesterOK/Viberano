@@ -74,8 +74,8 @@ describe('contrato de seguridad de Apps Script', () => {
   it('recupera una escritura parcial sin duplicar el registro definitivo', () => {
     const invoice = source('InvoiceService.js');
     expect(invoice).toContain('const sameSource = existingRows.find');
-    expect(invoice).toContain("if (sameSource)");
-    expect(invoice.indexOf('if (sameSource)')).toBeLessThan(invoice.indexOf("writeInvoiceRegister_(row, 'DUPLICADO IGNORADO'"));
+    expect(invoice).toContain('if (sameSource && !historicalReview)');
+    expect(invoice.indexOf('if (sameSource && !historicalReview)')).toBeLessThan(invoice.indexOf("writeInvoiceRegister_(row, 'DUPLICADO IGNORADO'"));
   });
 
   it('mantiene las excepciones justificadas fuera de la aprobación', () => {
@@ -218,6 +218,15 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(gmail).toContain("String(row.FASE || '') !== 'CANCELADO'");
     expect(gmail).toContain("batchStates[String(row.LOTE_ID || '')] !== 'CANCELADO'");
     expect(gmail).toContain('const duplicate = registeredDuplicate || activeTechnicalDuplicate');
+  });
+
+  it('completa una revisión histórica sin añadir otra factura', () => {
+    const gmail = source('GmailService.js');
+    const invoice = source('InvoiceService.js');
+    expect(gmail).toContain("sameOrigin && String(row.ESTADO || '') === 'REVISIÓN MANUAL'");
+    expect(invoice).toContain('invoiceMatchesDocumentSource_');
+    expect(invoice).toContain('updateHistoricalInvoiceRegister_');
+    expect(invoice).toContain('FACTURA_HISTORICA_ACTUALIZADA');
   });
 
   it('descarta vistas previas bancarias y bloquea decisiones prematuras', () => {

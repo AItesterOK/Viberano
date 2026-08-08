@@ -129,14 +129,15 @@ function finalizeDocument_(row, user, requestId) {
   const sourceKey = String(row.SOURCE_KEY || '');
   const hash = String(row.HASH_PDF || '');
   const existingRows = getRows_(APP.SHEETS.INVOICES);
-  const sameSource = existingRows.find(function (invoice) { return String(invoice.ID_UNICO || '') === sourceKey; });
-  if (sameSource) {
+  const sameSource = existingRows.find(function (invoice) { return invoiceMatchesDocumentSource_(invoice, row); });
+  const historicalReview = sameSource && String(sameSource.ESTADO || '') === 'REVISIÓN MANUAL' ? sameSource : null;
+  if (sameSource && !historicalReview) {
     updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, { FASE: 'FINALIZADO', ESTADO_FINAL: String(sameSource.ESTADO || 'DUPLICADO IGNORADO'), ARCHIVO_DRIVE: String(sameSource.ARCHIVO_DRIVE || ''), URL_DRIVE: String(sameSource.URL_DRIVE || ''), ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, ERROR: '' });
     return;
   }
-  const byteDuplicate = existingRows.find(function (invoice) { return hash && String(invoice.HASH_PDF || '') === hash; });
+  const byteDuplicate = existingRows.find(function (invoice) { return invoice.__row !== (historicalReview && historicalReview.__row) && hash && String(invoice.HASH_PDF || '') === hash; });
   const accountingKey = status === 'PROCESADA' ? invoiceAccountingKey_(row) : '';
-  const accountingDuplicate = status === 'PROCESADA' ? existingRows.find(function (invoice) { return invoiceAccountingKey_(invoice) === accountingKey; }) : null;
+  const accountingDuplicate = status === 'PROCESADA' ? existingRows.find(function (invoice) { return invoice.__row !== (historicalReview && historicalReview.__row) && invoiceAccountingKey_(invoice) === accountingKey; }) : null;
   const duplicate = byteDuplicate || accountingDuplicate;
   if (duplicate) {
     writeInvoiceRegister_(row, 'DUPLICADO IGNORADO', '', '', 'Coincidencia con ' + String(duplicate.ID_UNICO || ''), user);
@@ -145,18 +146,23 @@ function finalizeDocument_(row, user, requestId) {
   }
   let drive = { name: '', url: '' };
   if (status === 'PROCESADA') {
-    validateFinalInvoice_(row);
+    validateFinalInvoice_(row, historicalReview && historicalReview.__row);
     if (row.DRIVE_FILE_ID && row.URL_DRIVE) drive = { id: String(row.DRIVE_FILE_ID), name: String(row.ARCHIVO_DRIVE || ''), url: String(row.URL_DRIVE) };
     else {
       drive = archiveInvoice_(row);
       updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, { ARCHIVO_DRIVE: drive.name, URL_DRIVE: drive.url, DRIVE_FILE_ID: drive.id, ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user });
     }
   }
-  writeInvoiceRegister_(row, status, drive.name, drive.url, String(row.MOTIVO_REVISION || ''), user);
+  if (historicalReview) {
+    updateHistoricalInvoiceRegister_(historicalReview, row, status, drive.name, drive.url, String(row.MOTIVO_REVISION || ''), user);
+    logEvent_('INFO', 'FACTURA_HISTORICA_ACTUALIZADA', String(row.DOCUMENTO_ID || ''), 'La revisión histórica se completó sin crear otra fila', { invoiceRow: historicalReview.__row, status: status }, String(row.LOTE_ID || ''), requestId, user);
+  } else {
+    writeInvoiceRegister_(row, status, drive.name, drive.url, String(row.MOTIVO_REVISION || ''), user);
+  }
   updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, { FASE: 'FINALIZADO', ESTADO_FINAL: status, ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, ERROR: '' });
 }
 
-function validateFinalInvoice_(row) {
+function validateFinalInvoice_(row, ignoredInvoiceRow) {
   const providers = activeProviders_();
   const provider = providers.find(function (item) { return item.id === String(row.PROVEEDOR_ID); }) || providers.find(function (item) { return normalizeText_(item.name) === normalizeText_(row.PROVEEDOR || ''); });
   const nonRegularSupplier = toBoolean_(row.PROVEEDOR_NO_HABITUAL);
@@ -170,7 +176,7 @@ function validateFinalInvoice_(row) {
   const validationErrors = safeJsonParse_(row.ERRORES_VALIDACION_JSON, []);
   if (validationErrors.length) throw appError_('INVALID_INVOICE', validationErrors.join('; '));
   const key = invoiceAccountingKey_(row);
-  const duplicate = getRows_(APP.SHEETS.INVOICES).find(function (item) { return invoiceAccountingKey_(item) === key; });
+  const duplicate = getRows_(APP.SHEETS.INVOICES).find(function (item) { return item.__row !== ignoredInvoiceRow && invoiceAccountingKey_(item) === key; });
   if (duplicate) throw appError_('ACCOUNTING_DUPLICATE', 'Ya existe una factura con el mismo proveedor, número, fecha, importe y moneda.');
 }
 
@@ -182,6 +188,22 @@ function processedSupplierInvoiceCount_(supplierName) {
 
 function invoiceAccountingKey_(row) {
   return [normalizeText_(row.PROVEEDOR || ''), normalizeText_(row.NUMERO_FACTURA || row['NÚMERO_FACTURA'] || ''), parseDate_(row.FECHA_FACTURA), Number(row.IMPORTE_TOTAL || 0).toFixed(2), String(row.MONEDA || '').toUpperCase()].join('|');
+}
+
+function legacyInvoiceMessageId_(invoice) {
+  const reference = String(invoice.REFERENCIA_CORREO || '');
+  const fromReference = reference.match(/#(?:all|inbox)\/([a-z0-9]+)/i);
+  if (fromReference) return fromReference[1];
+  const fromLegacyId = String(invoice.ID_UNICO || '').match(/^gmail:([^|]+)\|/i);
+  return fromLegacyId ? fromLegacyId[1] : '';
+}
+
+function invoiceMatchesDocumentSource_(invoice, documentRow) {
+  const sourceKey = String(documentRow.SOURCE_KEY || '');
+  if (sourceKey && String(invoice.ID_UNICO || '') === sourceKey) return true;
+  const messageId = String(documentRow.MESSAGE_ID || '');
+  if (!messageId || legacyInvoiceMessageId_(invoice) !== messageId) return false;
+  return normalizeText_(invoice.NOMBRE_ORIGINAL || '') === normalizeText_(documentRow.NOMBRE_ORIGINAL || '');
 }
 
 function archiveInvoice_(row) {
@@ -208,6 +230,46 @@ function ensureFolder_(parentId, name) {
 function writeInvoiceRegister_(row, status, savedName, driveUrl, observation, user) {
   const keepAccountingFields = status === 'PROCESADA' || (status === 'DUPLICADO IGNORADO' && String(row.ESTADO_PROPUESTO || '') === 'PROCESADA');
   appendObject_(APP.SHEETS.INVOICES, { FECHA_FACTURA: keepAccountingFields ? parseDate_(row.FECHA_FACTURA) : '', FECHA_OPERACION: keepAccountingFields ? parseDate_(row.FECHA_OPERACION) : '', FECHA_VENCIMIENTO: keepAccountingFields ? parseDate_(row.FECHA_VENCIMIENTO) : '', CATEGORIA_ID: keepAccountingFields ? row.CATEGORIA_ID || '' : '', BASE_IMPONIBLE: keepAccountingFields && row.BASE_IMPONIBLE !== '' ? Number(row.BASE_IMPONIBLE) : '', IMPUESTOS_JSON: keepAccountingFields ? row.IMPUESTOS_JSON || '[]' : '[]', NOTA_INTERNA: keepAccountingFields ? row.NOTA_INTERNA || '' : '', ESTADO_CONCILIACION: keepAccountingFields ? 'SIN CONCILIAR' : '', IMPORTE_ASIGNADO: 0, PROVEEDOR: keepAccountingFields ? row.PROVEEDOR || '' : '', CIF_NIF: keepAccountingFields ? row.CIF_NIF || '' : '', 'NÚMERO_FACTURA': keepAccountingFields ? row.NUMERO_FACTURA || '' : '', IMPORTE_TOTAL: keepAccountingFields && Number.isFinite(Number(row.IMPORTE_TOTAL)) ? Number(row.IMPORTE_TOTAL) : '', MONEDA: keepAccountingFields ? row.MONEDA || '' : '', ESTADO: status, ARCHIVO_DRIVE: savedName || '', URL_DRIVE: driveUrl || '', REMITENTE: row.REMITENTE || '', ASUNTO: row.ASUNTO || '', FECHA_PROCESO: nowIso_(), OBSERVACIONES: observation || '', FECHA_CORREO: row.FECHA_CORREO || '', NOMBRE_ORIGINAL: row.NOMBRE_ORIGINAL || '', MOTIVO_REVISION: status === 'REVISIÓN MANUAL' ? observation : '', REFERENCIA_CORREO: row.GMAIL_URL || '', ID_UNICO: row.SOURCE_KEY || '', HASH_PDF: row.HASH_PDF || '', LOTE_ID: row.LOTE_ID || '', USUARIO_DECISION: user, FECHA_DECISION: nowIso_(), EVIDENCIA_JSON: row.EVIDENCIA_JSON || '[]', VERSION_ESQUEMA: APP.VERSION, PROVEEDOR_NO_HABITUAL: toBoolean_(row.PROVEEDOR_NO_HABITUAL) });
+}
+
+function updateHistoricalInvoiceRegister_(historical, row, status, savedName, driveUrl, observation, user) {
+  const keepAccountingFields = status === 'PROCESADA' || (status === 'DUPLICADO IGNORADO' && String(row.ESTADO_PROPUESTO || '') === 'PROCESADA');
+  const updates = {
+    FECHA_FACTURA: keepAccountingFields ? parseDate_(row.FECHA_FACTURA) : '',
+    FECHA_OPERACION: keepAccountingFields ? parseDate_(row.FECHA_OPERACION) : '',
+    FECHA_VENCIMIENTO: keepAccountingFields ? parseDate_(row.FECHA_VENCIMIENTO) : '',
+    CATEGORIA_ID: keepAccountingFields ? row.CATEGORIA_ID || '' : '',
+    BASE_IMPONIBLE: keepAccountingFields && row.BASE_IMPONIBLE !== '' ? Number(row.BASE_IMPONIBLE) : '',
+    IMPUESTOS_JSON: keepAccountingFields ? row.IMPUESTOS_JSON || '[]' : '[]',
+    NOTA_INTERNA: keepAccountingFields ? row.NOTA_INTERNA || '' : '',
+    ESTADO_CONCILIACION: keepAccountingFields ? 'SIN CONCILIAR' : '',
+    IMPORTE_ASIGNADO: 0,
+    PROVEEDOR: keepAccountingFields ? row.PROVEEDOR || '' : '',
+    CIF_NIF: keepAccountingFields ? row.CIF_NIF || '' : '',
+    IMPORTE_TOTAL: keepAccountingFields && Number.isFinite(Number(row.IMPORTE_TOTAL)) ? Number(row.IMPORTE_TOTAL) : '',
+    MONEDA: keepAccountingFields ? row.MONEDA || '' : '',
+    ESTADO: status,
+    ARCHIVO_DRIVE: savedName || '',
+    URL_DRIVE: driveUrl || '',
+    REMITENTE: row.REMITENTE || '',
+    ASUNTO: row.ASUNTO || '',
+    FECHA_PROCESO: nowIso_(),
+    OBSERVACIONES: observation || '',
+    FECHA_CORREO: row.FECHA_CORREO || '',
+    NOMBRE_ORIGINAL: row.NOMBRE_ORIGINAL || '',
+    MOTIVO_REVISION: status === 'REVISIÓN MANUAL' ? observation : '',
+    REFERENCIA_CORREO: row.GMAIL_URL || '',
+    ID_UNICO: row.SOURCE_KEY || '',
+    HASH_PDF: row.HASH_PDF || '',
+    LOTE_ID: row.LOTE_ID || '',
+    USUARIO_DECISION: user,
+    FECHA_DECISION: nowIso_(),
+    EVIDENCIA_JSON: row.EVIDENCIA_JSON || '[]',
+    VERSION_ESQUEMA: APP.VERSION,
+    PROVEEDOR_NO_HABITUAL: toBoolean_(row.PROVEEDOR_NO_HABITUAL),
+  };
+  updates['NÚMERO_FACTURA'] = keepAccountingFields ? row.NUMERO_FACTURA || '' : '';
+  updateObjectRow_(APP.SHEETS.INVOICES, historical.__row, updates);
 }
 
 function retryBatch_(batchId, user, requestId) {
