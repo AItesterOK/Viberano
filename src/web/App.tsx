@@ -369,7 +369,7 @@ function SettingsPage({ snapshot, updateSnapshot }: PageProps) {
 }
 
 function ReviewPageV18({ snapshot, updateSnapshot }: PageProps) {
-  const active = snapshot.activeBatch?.documents.filter((item) => item.phase !== 'FINALIZADO' && item.phase !== 'CANCELADO') ?? [];
+  const active = snapshot.activeBatch?.documents.filter((item) => item.phase === 'EN REVISIÓN' || item.phase === 'ERROR' || item.phase === 'LISTO PARA APROBAR') ?? [];
   const documents = [...snapshot.reviewDocuments, ...active.filter((item) => !snapshot.reviewDocuments.some((queued) => queued.id === item.id))];
   const storageKey = `reparapro-review-drafts:${snapshot.settings.user}`;
   const [drafts, setDrafts] = useState<Record<string, ReviewDraft>>(() => {
