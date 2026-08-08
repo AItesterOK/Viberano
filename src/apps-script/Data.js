@@ -145,11 +145,9 @@ function getActiveBatch_() {
 }
 
 function reviewDocuments_() {
-  const batchStates = getRows_(APP.SHEETS.BATCHES).reduce(function (map, row) { map[String(row.LOTE_ID || '')] = String(row.ESTADO || ''); return map; }, {});
   return getRows_(APP.SHEETS.DOCUMENTS).filter(function (row) {
     const phase = String(row.FASE || '');
-    const batchState = batchStates[String(row.LOTE_ID || '')] || '';
-    return phase === 'EN REVISIÓN' || phase === 'ERROR' || (phase === 'LISTO PARA APROBAR' && ['COMPLETADO', 'COMPLETADO CON ERRORES'].indexOf(batchState) !== -1);
+    return phase === 'EN REVISIÓN' || phase === 'ERROR' || phase === 'LISTO PARA APROBAR';
   }).map(documentFromRow_);
 }
 

@@ -61,6 +61,7 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(gmail).toContain('processedIds.indexOf(messageId)');
     expect(source('Data.js')).toContain('function reviewDocuments_()');
     expect(source('Api.js')).toContain('function apiApproveDocument');
+    expect(source('Data.js')).toContain("phase === 'LISTO PARA APROBAR'");
   });
 
   it('no infiere silenciosamente la moneda bancaria', () => {
