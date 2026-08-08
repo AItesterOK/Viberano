@@ -32,6 +32,20 @@ test('previsualiza el PDF de una factura con campos sin reconocer', async ({ pag
   await expect(dialog.getByRole('link', { name: /Abrir en otra pesta/ })).toBeVisible();
 });
 
+test('marca y valida una factura de proveedor no habitual sin crear un proveedor permanente', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Revisión/ }).first().click();
+  await page.getByRole('button', { name: /factura-demo-revision\.pdf/ }).click();
+  const frequency = page.getByLabel('Marcar como proveedor no habitual');
+  await expect(frequency).toBeVisible();
+  await frequency.check();
+  await expect(page.getByLabel('Nombre del proveedor en la factura')).toHaveValue('Proveedor Nuevo Demo SL');
+  await page.getByRole('button', { name: 'Factura de gasto', exact: true }).click();
+  await expect(page.getByText(/Factura de gasto · Proveedor no habitual/)).toBeVisible();
+  await page.getByRole('button', { name: 'Guardar decisión' }).click();
+  await expect(page.getByRole('button', { name: 'Aprobar documento' })).toBeVisible();
+});
+
 test('muestra la mesa operativa y navega por el flujo documental', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Qué necesita atención hoy' })).toBeVisible();

@@ -6,7 +6,7 @@ function apiBootstrap() {
     const invoiceRows = safeRows_(APP.SHEETS.INVOICES);
     const invoices = invoiceRows.map(invoiceFromRow_);
     const providerRows = safeRows_(APP.SHEETS.PROVIDERS).map(providerFromRow_);
-    const invoiceCounts = invoices.reduce(function (map, invoice) { const key = normalizeText_(invoice.supplier); map[key] = (map[key] || 0) + 1; return map; }, {});
+    const invoiceCounts = invoices.filter(function (invoice) { return invoice.status === 'PROCESADA'; }).reduce(function (map, invoice) { const key = normalizeText_(invoice.supplier); map[key] = (map[key] || 0) + 1; return map; }, {});
     providerRows.forEach(function (provider) { provider.invoiceCount = invoiceCounts[normalizeText_(provider.name)] || 0; delete provider.__row; });
     const metrics = buildMetrics_(invoices);
     // El LOG conserva el JSON completo en Sheets, pero el arranque solo necesita

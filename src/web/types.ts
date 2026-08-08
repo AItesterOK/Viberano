@@ -67,6 +67,7 @@ export interface InvoiceDocument {
   driveUrl?: string;
   gmailUrl?: string;
   selected: boolean;
+  nonRegularSupplier?: boolean;
 }
 
 export interface DocumentPreview {
@@ -125,6 +126,7 @@ export interface InvoiceRecord {
   originalName: string;
   batchId: string;
   hash: string;
+  nonRegularSupplier?: boolean;
 }
 
 export interface MonthlyMetric {

@@ -5,10 +5,15 @@ function saveDocumentReview_(payload, user, requestId) {
   if (String(row.REQUEST_ID || '') === String(requestId)) return documentFromRow_(row);
   if (!String(payload.reason || '').trim()) throw appError_('REASON_REQUIRED', 'Toda corrección manual necesita un motivo.');
   const providers = activeProviders_();
-  const provider = providers.find(function (item) { return item.id === input.supplierId; });
+  const provider = providers.find(function (item) { return item.id === input.supplierId; }) || providers.find(function (item) { return normalizeText_(item.name) === normalizeText_(input.supplier || ''); });
+  const nonRegularSupplier = Boolean(input.nonRegularSupplier);
+  const providerHistory = provider ? processedSupplierInvoiceCount_(provider.name) : 0;
+  const nonRegularEligible = !provider || providerHistory < 3;
   const errors = [];
   if (input.proposedStatus === 'PROCESADA') {
-    if (!provider) errors.push('Proveedor desconocido o inactivo');
+    if (!String(input.supplier || '').trim() && !provider) errors.push('Proveedor ausente');
+    if (!provider && !nonRegularSupplier) errors.push('Proveedor desconocido o inactivo');
+    if (nonRegularSupplier && !nonRegularEligible) errors.push('El proveedor ya es habitual: tiene al menos 3 facturas históricas');
     if (!String(input.invoiceNumber || '').trim()) errors.push('Número de factura ausente');
     if (!parseDate_(input.invoiceDate)) errors.push('Fecha inválida');
     if (input.total === null || !isValidInvoiceAmount_(input.total, input, payload.reason)) errors.push('Importe inválido; las notas de crédito deben estar acreditadas y tener importe negativo');
@@ -19,7 +24,9 @@ function saveDocumentReview_(payload, user, requestId) {
   const proposed = errors.length || keepInReview ? 'REVISIÓN MANUAL' : input.proposedStatus;
   const keepAccountingFields = proposed === 'PROCESADA' || proposed === 'REVISIÓN MANUAL';
   const previous = documentFromRow_(row);
-  updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, { FECHA_FACTURA: keepAccountingFields ? parseDate_(input.invoiceDate) : '', PROVEEDOR: keepAccountingFields ? (provider ? provider.name : input.supplier || '') : '', PROVEEDOR_ID: keepAccountingFields && provider ? provider.id : '', CIF_NIF: keepAccountingFields ? input.taxId || '' : '', NUMERO_FACTURA: keepAccountingFields ? input.invoiceNumber || '' : '', IMPORTE_TOTAL: keepAccountingFields && input.total !== null && Number.isFinite(Number(input.total)) ? Number(input.total) : '', MONEDA: keepAccountingFields ? String(input.currency || '').toUpperCase() : '', FASE: phase, ESTADO_PROPUESTO: proposed, MOTIVO_REVISION: errors.length ? errors.join('; ') : String(payload.reason), EVIDENCIA_JSON: JSON.stringify((input.evidence || []).concat([{ field: 'manualDecision', value: proposed, source: 'MANUAL', excerpt: String(payload.reason) }])), SELECCIONADO: phase === 'LISTO PARA APROBAR', ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, REQUEST_ID: requestId });
+  const manualEvidence = [{ field: 'manualDecision', value: proposed, source: 'MANUAL', excerpt: String(payload.reason) }];
+  if (nonRegularSupplier) manualEvidence.push({ field: 'supplierFrequency', value: 'PROVEEDOR NO HABITUAL', source: 'MANUAL', excerpt: provider ? providerHistory + ' factura(s) histórica(s) procesada(s)' : 'Proveedor no reconocido en el catálogo' });
+  updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, { FECHA_FACTURA: keepAccountingFields ? parseDate_(input.invoiceDate) : '', PROVEEDOR: keepAccountingFields ? (provider ? provider.name : input.supplier || '') : '', PROVEEDOR_ID: keepAccountingFields && provider ? provider.id : '', CIF_NIF: keepAccountingFields ? input.taxId || '' : '', NUMERO_FACTURA: keepAccountingFields ? input.invoiceNumber || '' : '', IMPORTE_TOTAL: keepAccountingFields && input.total !== null && Number.isFinite(Number(input.total)) ? Number(input.total) : '', MONEDA: keepAccountingFields ? String(input.currency || '').toUpperCase() : '', FASE: phase, ESTADO_PROPUESTO: proposed, MOTIVO_REVISION: errors.length ? errors.join('; ') : String(payload.reason), EVIDENCIA_JSON: JSON.stringify((input.evidence || []).concat(manualEvidence)), SELECCIONADO: phase === 'LISTO PARA APROBAR', PROVEEDOR_NO_HABITUAL: keepAccountingFields && nonRegularSupplier, ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, REQUEST_ID: requestId });
   logEvent_('INFO', 'DOCUMENTO_REVISADO', input.id, String(payload.reason), { before: previous, after: input, validationErrors: errors }, String(row.LOTE_ID || ''), requestId, user);
   return documentFromRow_(getRows_(APP.SHEETS.DOCUMENTS).find(function (item) { return item.__row === row.__row; }));
 }
@@ -102,7 +109,11 @@ function finalizeDocument_(row, user, requestId) {
 
 function validateFinalInvoice_(row) {
   const providers = activeProviders_();
-  if (!providers.some(function (provider) { return provider.id === String(row.PROVEEDOR_ID); })) throw appError_('INVALID_SUPPLIER', 'El proveedor no está activo.');
+  const provider = providers.find(function (item) { return item.id === String(row.PROVEEDOR_ID); }) || providers.find(function (item) { return normalizeText_(item.name) === normalizeText_(row.PROVEEDOR || ''); });
+  const nonRegularSupplier = toBoolean_(row.PROVEEDOR_NO_HABITUAL);
+  if (!String(row.PROVEEDOR || '').trim()) throw appError_('INVALID_SUPPLIER', 'Falta el nombre acreditado del proveedor.');
+  if (!nonRegularSupplier && !provider) throw appError_('INVALID_SUPPLIER', 'El proveedor no está activo.');
+  if (nonRegularSupplier && provider && processedSupplierInvoiceCount_(provider.name) >= 3) throw appError_('SUPPLIER_ALREADY_REGULAR', 'El proveedor ya es habitual: tiene al menos 3 facturas históricas.');
   if (!String(row.NUMERO_FACTURA || '').trim()) throw appError_('INVALID_INVOICE', 'Falta número de factura.');
   if (!parseDate_(row.FECHA_FACTURA)) throw appError_('INVALID_INVOICE', 'Fecha de factura inválida.');
   if (!isValidInvoiceAmount_(row.IMPORTE_TOTAL, row)) throw appError_('INVALID_INVOICE', 'Importe total inválido; las notas de crédito deben estar acreditadas y tener importe negativo.');
@@ -110,6 +121,12 @@ function validateFinalInvoice_(row) {
   const key = invoiceAccountingKey_(row);
   const duplicate = getRows_(APP.SHEETS.INVOICES).find(function (item) { return invoiceAccountingKey_(item) === key; });
   if (duplicate) throw appError_('ACCOUNTING_DUPLICATE', 'Ya existe una factura con el mismo proveedor, número, fecha, importe y moneda.');
+}
+
+function processedSupplierInvoiceCount_(supplierName) {
+  const normalized = normalizeText_(supplierName || '');
+  if (!normalized) return 0;
+  return getRows_(APP.SHEETS.INVOICES).filter(function (row) { return String(row.ESTADO || '') === 'PROCESADA' && normalizeText_(row.PROVEEDOR || '') === normalized; }).length;
 }
 
 function invoiceAccountingKey_(row) {
@@ -139,7 +156,7 @@ function ensureFolder_(parentId, name) {
 
 function writeInvoiceRegister_(row, status, savedName, driveUrl, observation, user) {
   const keepAccountingFields = status === 'PROCESADA' || (status === 'DUPLICADO IGNORADO' && String(row.ESTADO_PROPUESTO || '') === 'PROCESADA');
-  appendObject_(APP.SHEETS.INVOICES, { FECHA_FACTURA: keepAccountingFields ? parseDate_(row.FECHA_FACTURA) : '', PROVEEDOR: keepAccountingFields ? row.PROVEEDOR || '' : '', CIF_NIF: keepAccountingFields ? row.CIF_NIF || '' : '', 'NÚMERO_FACTURA': keepAccountingFields ? row.NUMERO_FACTURA || '' : '', IMPORTE_TOTAL: keepAccountingFields && Number.isFinite(Number(row.IMPORTE_TOTAL)) ? Number(row.IMPORTE_TOTAL) : '', MONEDA: keepAccountingFields ? row.MONEDA || '' : '', ESTADO: status, ARCHIVO_DRIVE: savedName || '', URL_DRIVE: driveUrl || '', REMITENTE: row.REMITENTE || '', ASUNTO: row.ASUNTO || '', FECHA_PROCESO: nowIso_(), OBSERVACIONES: observation || '', FECHA_CORREO: row.FECHA_CORREO || '', NOMBRE_ORIGINAL: row.NOMBRE_ORIGINAL || '', MOTIVO_REVISION: status === 'REVISIÓN MANUAL' ? observation : '', REFERENCIA_CORREO: row.GMAIL_URL || '', ID_UNICO: row.SOURCE_KEY || '', HASH_PDF: row.HASH_PDF || '', LOTE_ID: row.LOTE_ID || '', USUARIO_DECISION: user, FECHA_DECISION: nowIso_(), EVIDENCIA_JSON: row.EVIDENCIA_JSON || '[]', VERSION_ESQUEMA: APP.VERSION });
+  appendObject_(APP.SHEETS.INVOICES, { FECHA_FACTURA: keepAccountingFields ? parseDate_(row.FECHA_FACTURA) : '', PROVEEDOR: keepAccountingFields ? row.PROVEEDOR || '' : '', CIF_NIF: keepAccountingFields ? row.CIF_NIF || '' : '', 'NÚMERO_FACTURA': keepAccountingFields ? row.NUMERO_FACTURA || '' : '', IMPORTE_TOTAL: keepAccountingFields && Number.isFinite(Number(row.IMPORTE_TOTAL)) ? Number(row.IMPORTE_TOTAL) : '', MONEDA: keepAccountingFields ? row.MONEDA || '' : '', ESTADO: status, ARCHIVO_DRIVE: savedName || '', URL_DRIVE: driveUrl || '', REMITENTE: row.REMITENTE || '', ASUNTO: row.ASUNTO || '', FECHA_PROCESO: nowIso_(), OBSERVACIONES: observation || '', FECHA_CORREO: row.FECHA_CORREO || '', NOMBRE_ORIGINAL: row.NOMBRE_ORIGINAL || '', MOTIVO_REVISION: status === 'REVISIÓN MANUAL' ? observation : '', REFERENCIA_CORREO: row.GMAIL_URL || '', ID_UNICO: row.SOURCE_KEY || '', HASH_PDF: row.HASH_PDF || '', LOTE_ID: row.LOTE_ID || '', USUARIO_DECISION: user, FECHA_DECISION: nowIso_(), EVIDENCIA_JSON: row.EVIDENCIA_JSON || '[]', VERSION_ESQUEMA: APP.VERSION, PROVEEDOR_NO_HABITUAL: toBoolean_(row.PROVEEDOR_NO_HABITUAL) });
 }
 
 function retryBatch_(batchId, user, requestId) {

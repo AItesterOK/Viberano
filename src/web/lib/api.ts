@@ -120,7 +120,7 @@ export const api = {
     const docs = mock.activeBatch.documents.map((doc) => documentIds.includes(doc.id) ? { ...doc, phase: 'FINALIZADO' as const, finalStatus: doc.proposedStatus } : doc);
     docs.forEach((doc) => {
       if (!documentIds.includes(doc.id) || doc.proposedStatus !== 'PROCESADA') return;
-      mock.invoices.unshift({ id: `inv-${doc.id}`, date: doc.invoiceDate, supplier: doc.supplier, taxId: doc.taxId, number: doc.invoiceNumber, total: doc.total ?? 0, currency: doc.currency, status: 'PROCESADA', driveUrl: '#', gmailUrl: doc.gmailUrl, originalName: doc.originalName, batchId, hash: doc.hash });
+      mock.invoices.unshift({ id: `inv-${doc.id}`, date: doc.invoiceDate, supplier: doc.supplier, taxId: doc.taxId, number: doc.invoiceNumber, total: doc.total ?? 0, currency: doc.currency, status: 'PROCESADA', driveUrl: '#', gmailUrl: doc.gmailUrl, originalName: doc.originalName, batchId, hash: doc.hash, nonRegularSupplier: doc.nonRegularSupplier });
     });
     mock.activeBatch = { ...mock.activeBatch, documents: docs, status: 'COMPLETADO', approvedAt: new Date().toISOString(), approvedBy: mock.settings.user };
     mock.metrics = buildMonthlyMetrics(mock.invoices, new Date('2026-07-31T12:00:00Z'));

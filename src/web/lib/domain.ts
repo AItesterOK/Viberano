@@ -43,7 +43,9 @@ export function validateInvoice(input: InvoiceDocument, activeSuppliers: Supplie
   if (input.total === null || (creditNote ? input.total >= 0 : input.total <= 0)) errors.push('Importe total inválido');
   if (!/^[A-Z]{3}$/.test(input.currency)) errors.push('Moneda no identificada');
   const supplier = activeSuppliers.find((item) => item.active && (item.id === input.supplierId || normalizeText(item.name) === normalizeText(input.supplier)));
-  if (!supplier) errors.push('Proveedor desconocido o inactivo');
+  if (input.nonRegularSupplier) {
+    if (supplier && supplier.invoiceCount >= 3) errors.push('El proveedor ya es habitual: tiene al menos 3 facturas históricas');
+  } else if (!supplier) errors.push('Proveedor desconocido o inactivo');
   return errors;
 }
 

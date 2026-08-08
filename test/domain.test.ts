@@ -21,6 +21,14 @@ describe('reglas documentales', () => {
     expect(validateInvoice({ ...document, invoiceNumber: '', total: 0 }, mockSuppliers)).toEqual(expect.arrayContaining(['Número de factura ausente', 'Importe total inválido']));
   });
 
+  it('permite un proveedor no habitual solo cuando tiene menos de 3 facturas o no está reconocido', () => {
+    const base = { id: 'one-off', batchId: 'b', messageId: 'm', originalName: 'one-off.pdf', sender: '', subject: '', emailDate: '', invoiceDate: '2026-07-16', supplier: 'Proveedor puntual', taxId: '', invoiceNumber: 'ONE-1', total: 10, currency: 'EUR', phase: 'EN REVISIÓN', proposedStatus: 'PROCESADA', reviewReason: 'Compra puntual', evidence: [], hash: 'h-one', selected: false, nonRegularSupplier: true } as import('../src/web/types').InvoiceDocument;
+    expect(validateInvoice(base, mockSuppliers)).toEqual([]);
+    expect(validateInvoice({ ...base, supplier: 'Logística Demo SL', supplierId: 'sup-logistica' }, mockSuppliers)).toEqual([]);
+    expect(validateInvoice({ ...base, supplier: 'Componentes Demo Europa BV', supplierId: 'sup-europa' }, mockSuppliers)).toContain('El proveedor ya es habitual: tiene al menos 3 facturas históricas');
+    expect(validateInvoice({ ...base, nonRegularSupplier: false }, mockSuppliers)).toContain('Proveedor desconocido o inactivo');
+  });
+
   it('acepta notas de crédito acreditadas y conserva el importe negativo en el nombre', () => {
     const credit = { id: 'cn', batchId: 'b', messageId: 'm', originalName: 'avoir-CN-5003713.pdf', sender: '', subject: 'Credit note', emailDate: '', invoiceDate: '2026-07-21', supplier: 'Componentes Demo Europa BV', supplierId: 'sup-europa', taxId: '', invoiceNumber: 'CN-5003713', total: -21.5, currency: 'EUR', phase: 'LISTO PARA APROBAR', proposedStatus: 'PROCESADA', reviewReason: 'Nota de crédito acreditada', evidence: [{ field: 'documentType', value: 'NOTA DE CRÉDITO', source: 'PDF', excerpt: 'avoir' }], hash: 'h-cn', selected: true } as import('../src/web/types').InvoiceDocument;
     expect(validateInvoice(credit, mockSuppliers)).toEqual([]);

@@ -247,4 +247,17 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(preview).toContain('Utilities.base64Encode(bytes)');
     expect(preview).not.toMatch(/DriveApp|Drive\.Files|appendObject_|updateObjectRow_/);
   });
+
+  it('valida y conserva la marca de proveedor no habitual con umbral de 3 facturas', () => {
+    const config = source('Config.js');
+    const invoice = source('InvoiceService.js');
+    const data = source('Data.js');
+    expect(config).toContain("VERSION: '1.6.0'");
+    expect(config).toContain("'PROVEEDOR_NO_HABITUAL'");
+    expect(invoice).toContain('processedSupplierInvoiceCount_');
+    expect(invoice).toContain('providerHistory < 3');
+    expect(invoice).toContain("appError_('SUPPLIER_ALREADY_REGULAR'");
+    expect(invoice).toContain('PROVEEDOR_NO_HABITUAL: toBoolean_(row.PROVEEDOR_NO_HABITUAL)');
+    expect(data).toContain('nonRegularSupplier: toBoolean_(row.PROVEEDOR_NO_HABITUAL)');
+  });
 });
