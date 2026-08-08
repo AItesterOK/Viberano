@@ -172,7 +172,14 @@ function analyzeAttachment_(batchId, messageId, attachment, metadata, sourceKey,
   const bytes = base64UrlDecode_(raw.data);
   const hash = bytesHash_(bytes);
   const batchStates = getRows_(APP.SHEETS.BATCHES).reduce(function (map, row) { map[String(row.LOTE_ID || '')] = String(row.ESTADO || ''); return map; }, {});
-  const registeredDuplicate = getRows_(APP.SHEETS.INVOICES).some(function (row) { return String(row.HASH_PDF || '') === hash || String(row.ID_UNICO || '') === sourceKey; });
+  const registeredDuplicate = getRows_(APP.SHEETS.INVOICES).some(function (row) {
+    const sameHash = Boolean(hash) && String(row.HASH_PDF || '') === hash;
+    const sameOrigin = invoiceMatchesDocumentSource_(row, { MESSAGE_ID: messageId, NOMBRE_ORIGINAL: attachment.filename, SOURCE_KEY: sourceKey });
+    // A legacy manual-review row is the same unresolved document, not a
+    // duplicate. Let the new OCR/review flow complete that row in place.
+    if (sameOrigin && String(row.ESTADO || '') === 'REVISIÓN MANUAL') return false;
+    return sameHash || sameOrigin;
+  });
   const activeTechnicalDuplicate = getRows_(APP.SHEETS.DOCUMENTS).some(function (row) { return String(row.HASH_PDF || '') === hash && String(row.FASE || '') !== 'CANCELADO' && batchStates[String(row.LOTE_ID || '')] !== 'CANCELADO'; });
   const duplicate = registeredDuplicate || activeTechnicalDuplicate;
   let extracted = { text: '', tempId: '' };
