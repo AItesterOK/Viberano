@@ -4,20 +4,21 @@ function apiBootstrap() {
   return withApi_(null, function (user) {
     const config = getConfigMap_();
     const invoiceRows = safeRows_(APP.SHEETS.INVOICES);
-    const invoices = invoiceRows.map(invoiceFromRow_);
+    const allInvoices = invoiceRows.map(invoiceFromRow_);
+    const invoices = allInvoices.slice(-500).reverse();
     const providerRows = safeRows_(APP.SHEETS.PROVIDERS).map(providerFromRow_);
-    const invoiceCounts = invoices.filter(function (invoice) { return invoice.status === 'PROCESADA'; }).reduce(function (map, invoice) { const key = normalizeText_(invoice.supplier); map[key] = (map[key] || 0) + 1; return map; }, {});
+    const invoiceCounts = allInvoices.filter(function (invoice) { return invoice.status === 'PROCESADA'; }).reduce(function (map, invoice) { const key = normalizeText_(invoice.supplier); map[key] = (map[key] || 0) + 1; return map; }, {});
     providerRows.forEach(function (provider) { provider.invoiceCount = invoiceCounts[normalizeText_(provider.name)] || 0; delete provider.__row; });
-    const metrics = buildMetrics_(invoices);
+    const metrics = buildMetrics_(allInvoices);
     // El LOG conserva el JSON completo en Sheets, pero el arranque solo necesita
     // un resumen acotado para no superar el límite de respuesta de google.script.run.
     const logRows = safeRows_(APP.SHEETS.LOG).slice(-50).reverse();
-    const schemaReady = Boolean(spreadsheet_().getSheetByName(APP.SHEETS.BATCHES) && spreadsheet_().getSheetByName(APP.SHEETS.DOCUMENTS) && spreadsheet_().getSheetByName(APP.SHEETS.MOVEMENTS) && spreadsheet_().getSheetByName(APP.SHEETS.RECONCILIATIONS));
+    const schemaReady = Boolean(spreadsheet_().getSheetByName(APP.SHEETS.BATCHES) && spreadsheet_().getSheetByName(APP.SHEETS.DOCUMENTS) && spreadsheet_().getSheetByName(APP.SHEETS.MOVEMENTS) && spreadsheet_().getSheetByName(APP.SHEETS.RECONCILIATIONS) && spreadsheet_().getSheetByName(APP.SHEETS.CATEGORIES) && spreadsheet_().getSheetByName(APP.SHEETS.EXPORTS));
     const reviewDocuments = schemaReady ? reviewDocuments_() : [];
     const triggers = projectTriggers_();
     return {
       settings: { mode: String(config.APP_MODE || 'DRY_RUN'), user: user, effectiveUser: getEffectiveEmail_(), allowedUsers: String(config.APP_ALLOWED_USERS || APP.OWNER_EMAIL).split(/[;,\s]+/).filter(Boolean), timezone: String(config.APP_TIMEZONE || APP.TIMEZONE), spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), sliceSize: Number(config.APP_SLICE_SIZE || APP.SLICE_SIZE), startDate: effectiveStartDate_(config), services: { gmail: true, drive: true, sheets: true }, triggers: triggers || [], triggerDiagnosticAvailable: triggers !== null, schemaReady: schemaReady },
-      activeBatch: schemaReady ? getActiveBatch_() : null, reviewDocuments: reviewDocuments, invoices: invoices, suppliers: providerRows, metrics: metrics, bankImports: schemaReady ? allBankImports_() : [], audit: logRows.map(function (row) { return { id: String(row.ID_EVENTO || ('legacy-log-' + row.__row)), timestamp: String(row.FECHA_HORA || ''), level: String(row.NIVEL || 'INFO'), action: String(row['ACCIÓN'] || ''), object: String(row.DOCUMENTO || ''), detail: String(row.DETALLE || '').slice(0, 1000), user: String(row.USUARIO || 'sistema'), batchId: String(row.LOTE_ID || '') || undefined }; }), reviewCount: reviewDocuments.length, processedCount: invoices.filter(function (item) { return item.status === 'PROCESADA'; }).length, duplicateCount: invoices.filter(function (item) { return item.status === 'DUPLICADO IGNORADO'; }).length,
+      activeBatch: schemaReady ? getActiveBatch_() : null, reviewDocuments: reviewDocuments, invoices: invoices, suppliers: providerRows, categories: schemaReady ? categories_().map(function (item) { delete item.__row; return item; }) : [], metrics: metrics, bankImports: schemaReady ? allBankImports_().slice(0, 12) : [], exports: schemaReady ? safeRows_(APP.SHEETS.EXPORTS).slice(-24).reverse().map(exportFromRow_) : [], audit: logRows.map(function (row) { return { id: String(row.ID_EVENTO || ('legacy-log-' + row.__row)), timestamp: String(row.FECHA_HORA || ''), level: String(row.NIVEL || 'INFO'), action: String(row['ACCIÓN'] || ''), object: String(row.DOCUMENTO || ''), detail: String(row.DETALLE || '').slice(0, 1000), user: String(row.USUARIO || 'sistema'), batchId: String(row.LOTE_ID || '') || undefined }; }), reviewCount: reviewDocuments.length, processedCount: allInvoices.filter(function (item) { return item.status === 'PROCESADA'; }).length, duplicateCount: allInvoices.filter(function (item) { return item.status === 'DUPLICADO IGNORADO'; }).length,
     };
   });
 }
@@ -27,6 +28,7 @@ function apiStartBatch(payload) { return withApi_(payload, function (user, reque
 function apiContinueBatch(payload) { return withApi_(payload, function (user, requestId) { return continueBatch_(payload.batchId, user, requestId); }, { lock: true }); }
 function apiCancelBatch(payload) { return withApi_(payload, function (user, requestId) { return cancelBatch_(payload, user, requestId); }, { lock: true }); }
 function apiSaveDocumentReview(payload) { return withApi_(payload, function (user, requestId) { return saveDocumentReview_(payload, user, requestId); }, { lock: true }); }
+function apiSaveDocumentReviews(payload) { return withApi_(payload, function (user, requestId) { return saveDocumentReviews_(payload, user, requestId); }, { lock: true }); }
 function apiApproveDocument(payload) { return withApi_(payload, function (user, requestId) { return approveDocument_(payload.documentId, user, requestId); }, { lock: true }); }
 function apiApproveBatch(payload) { return withApi_(payload, function (user, requestId) { return approveBatch_(payload, user, requestId); }, { lock: true }); }
 function apiRetryBatch(payload) { return withApi_(payload, function (user, requestId) { return retryBatch_(payload.batchId, user, requestId); }, { lock: true }); }
@@ -34,6 +36,14 @@ function apiPreviewBankImport(payload) { return withApi_(payload, function (user
 function apiConfirmBankImport(payload) { return withApi_(payload, function (user, requestId) { return confirmBankImport_(payload.importId, user, requestId); }, { lock: true }); }
 function apiCancelBankImport(payload) { return withApi_(payload, function (user, requestId) { return cancelBankImport_(payload, user, requestId); }, { lock: true }); }
 function apiDecideReconciliation(payload) { return withApi_(payload, function (user, requestId) { return decideReconciliation_(payload, user, requestId); }, { lock: true }); }
+function apiSaveReconciliationLinks(payload) { return withApi_(payload, function (user, requestId) { return saveReconciliationLinks_(payload, user, requestId); }, { lock: true }); }
+function apiUndoReconciliation(payload) { return withApi_(payload, function (user, requestId) { return undoReconciliation_(payload, user, requestId); }, { lock: true }); }
+function apiSaveReconciliationException(payload) { return withApi_(payload, function (user, requestId) { return saveReconciliationException_(payload, user, requestId); }, { lock: true }); }
+function apiSaveCategory(payload) { return withApi_(payload, function (user, requestId) { return saveCategory_(payload, user, requestId); }, { lock: true }); }
+function apiGetMonthlyClose(payload) { return withApi_(payload, function () { return buildMonthlyClose_(payload.period); }); }
+function apiCreateAccountantExport(payload) { return withApi_(payload, function (user, requestId) { return createAccountantExport_(payload, user, requestId); }, { lock: true }); }
+function apiListInvoices(payload) { return withApi_(payload, function () { const limit = Math.min(Math.max(Number(payload && payload.limit || 100), 1), 500); const offset = Math.max(Number(payload && payload.offset || 0), 0); const rows = safeRows_(APP.SHEETS.INVOICES).map(invoiceFromRow_).reverse(); return { items: rows.slice(offset, offset + limit), nextOffset: offset + limit < rows.length ? offset + limit : null, total: rows.length }; }); }
+function apiListBankImports(payload) { return withApi_(payload, function () { const limit = Math.min(Math.max(Number(payload && payload.limit || 12), 1), 50); const offset = Math.max(Number(payload && payload.offset || 0), 0); const rows = allBankImports_(); return { items: rows.slice(offset, offset + limit), nextOffset: offset + limit < rows.length ? offset + limit : null, total: rows.length }; }); }
 
 function apiGetDiagnostics() { return withApi_(null, function () { const triggers = projectTriggers_(); return { triggers: triggers || [], triggerDiagnosticAvailable: triggers !== null, mode: String(getConfigMap_().APP_MODE || 'DRY_RUN'), version: APP.VERSION }; }); }
 function apiDisableLegacyTriggers(payload) { return withApi_(payload, function (user, requestId) { return disableLegacyTriggers_(payload, user, requestId); }, { lock: true }); }
@@ -64,7 +74,7 @@ function apiGetDocumentPreview(payload) {
   });
 }
 function apiGetMetrics() { return withApi_(null, function () { return buildMetrics_(safeRows_(APP.SHEETS.INVOICES).map(invoiceFromRow_)); }); }
-function apiListAudit(payload) { return withApi_(payload, function () { const limit = Math.min(Math.max(Number(payload && payload.limit || 100), 1), 500); return safeRows_(APP.SHEETS.LOG).slice(-limit).reverse(); }); }
+function apiListAudit(payload) { return withApi_(payload, function () { const limit = Math.min(Math.max(Number(payload && payload.limit || 100), 1), 500); const offset = Math.max(Number(payload && payload.offset || 0), 0); const rows = safeRows_(APP.SHEETS.LOG).slice().reverse(); return { items: rows.slice(offset, offset + limit), nextOffset: offset + limit < rows.length ? offset + limit : null, total: rows.length }; }); }
 function apiExportSuppliers() { return withApi_(null, function () { return safeRows_(APP.SHEETS.PROVIDERS).map(function (row) { return { PROVEEDOR: String(row.PROVEEDOR || ''), DOMINIO: String(row.DOMINIO || ''), CIF_NIF: String(row.CIF_NIF || '') }; }); }); }
 
 function apiSaveSupplier(payload) {

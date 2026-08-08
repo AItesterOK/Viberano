@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AppSnapshot, BankImport, DocumentPreview, InvoiceDocument, InvoiceRecord, Supplier } from './types';
+import type { AppSnapshot, BankImport, DocumentPreview, ExpenseCategory, InvoiceDocument, InvoiceRecord, MonthlyClose, ReconciliationLink, ReviewDraft, Supplier, TaxLine } from './types';
 import { api } from './lib/api';
 import { csvEscape, formatInvoiceFileName, invoiceArchivePath, metricsAverages, normalizeText } from './lib/domain';
 import { Icon, type IconName } from './components/Icon';
 import { Button, EmptyState, EvidenceChain, Field, Modal, SectionHeader, StatusBadge, formatCurrency, formatDate } from './components/UI';
 
-type Page = 'home' | 'process' | 'review' | 'invoices' | 'suppliers' | 'bank' | 'metrics' | 'history' | 'settings';
+type Page = 'home' | 'process' | 'review' | 'invoices' | 'suppliers' | 'bank' | 'close' | 'metrics' | 'history' | 'settings';
 
 const navItems: { id: Page; label: string; icon: IconName; mobile?: boolean }[] = [
   { id: 'home', label: 'Inicio', icon: 'home', mobile: true },
@@ -14,6 +14,7 @@ const navItems: { id: Page; label: string; icon: IconName; mobile?: boolean }[] 
   { id: 'invoices', label: 'Facturas', icon: 'invoice', mobile: true },
   { id: 'suppliers', label: 'Proveedores', icon: 'supplier' },
   { id: 'bank', label: 'Conciliación', icon: 'bank' },
+  { id: 'close', label: 'Cierre mensual', icon: 'archive' },
   { id: 'metrics', label: 'Métricas', icon: 'metrics' },
   { id: 'history', label: 'Historial', icon: 'history' },
   { id: 'settings', label: 'Configuración', icon: 'settings' },
@@ -43,10 +44,11 @@ export function App() {
   const content = {
     home: <HomePage {...pageProps} />,
     process: <ProcessingPage {...pageProps} />,
-    review: <ReviewPage {...pageProps} />,
+    review: <ReviewPageV18 {...pageProps} />,
     invoices: <InvoicesPage {...pageProps} />,
     suppliers: <SuppliersPage {...pageProps} />,
-    bank: <BankPage {...pageProps} />,
+    bank: <BankPageV18 {...pageProps} />,
+    close: <MonthlyClosePage {...pageProps} />,
     metrics: <MetricsPage {...pageProps} />,
     history: <HistoryPage {...pageProps} />,
     settings: <SettingsPage {...pageProps} />,
@@ -157,7 +159,7 @@ function ProcessingPage({ snapshot, updateSnapshot, navigate }: PageProps) {
   </>;
 }
 
-function SummaryNumber({ label, value }: { label: string; value: number }) { return <div><strong>{value}</strong><span>{label}</span></div>; }
+function SummaryNumber({ label, value }: { label: string; value: number | string }) { return <div><strong>{value}</strong><span>{label}</span></div>; }
 
 function senderDomain(sender: string) {
   return sender.match(/@([a-z0-9.-]+\.[a-z]{2,})/i)?.[1]?.toLowerCase() ?? '';
@@ -281,12 +283,13 @@ function ReviewPage({ snapshot, updateSnapshot }: PageProps) {
 }
 
 function InvoicesPage({ snapshot }: PageProps) {
-  const [query, setQuery] = useState(''); const [status, setStatus] = useState('TODOS'); const [detail, setDetail] = useState<InvoiceRecord | null>(null);
+  const [query, setQuery] = useState(''); const [status, setStatus] = useState('TODOS'); const [detail, setDetail] = useState<InvoiceRecord | null>(null); const [page, setPage] = useState(0);
   const invoices = useMemo(() => snapshot.invoices.filter((item) => (status === 'TODOS' || item.status === status) && [item.supplier, item.number, item.originalName].join(' ').toLowerCase().includes(query.toLowerCase())), [snapshot.invoices, query, status]);
+  const pageSize = 50; const visibleInvoices = invoices.slice(page * pageSize, (page + 1) * pageSize);
   return <>
     <SectionHeader eyebrow="Archivo documental" title="Facturas y documentos" description="Consulta el resultado, el origen y la trazabilidad de cada documento registrado."/>
     <div className="table-toolbar"><label className="search-box"><Icon name="search" size={18}/><input placeholder="Buscar proveedor, número o archivo" value={query} onChange={(e) => setQuery(e.target.value)}/></label><select value={status} onChange={(e) => setStatus(e.target.value)}><option>TODOS</option><option>PROCESADA</option><option>REVISIÓN MANUAL</option><option>DUPLICADO IGNORADO</option><option>NO ES FACTURA</option><option>FACTURA DE VENTA</option></select><span>{invoices.length} resultados</span></div>
-    <div className="data-table"><table><thead><tr><th>Fecha</th><th>Proveedor / documento</th><th>Número</th><th className="numeric">Importe</th><th>Estado</th><th/></tr></thead><tbody>{invoices.map((invoice) => <tr key={invoice.id}><td>{formatDate(invoice.date)}</td><td><strong>{invoice.supplier}</strong><small>{invoice.originalName}</small>{invoice.nonRegularSupplier && <span className="supplier-frequency-tag">No habitual</span>}</td><td className="mono">{invoice.number || '—'}</td><td className="numeric">{formatCurrency(invoice.total, invoice.currency)}</td><td><StatusBadge status={invoice.status}/></td><td><button className="icon-button" aria-label="Ver detalle" onClick={() => setDetail(invoice)}><Icon name="eye"/></button></td></tr>)}</tbody></table></div>
+    <div className="data-table"><table><thead><tr><th>Fecha</th><th>Proveedor / documento</th><th>Número</th><th className="numeric">Importe</th><th>Estado</th><th/></tr></thead><tbody>{visibleInvoices.map((invoice) => <tr key={invoice.id}><td>{formatDate(invoice.date)}</td><td><strong>{invoice.supplier}</strong><small>{invoice.originalName}</small>{invoice.nonRegularSupplier && <span className="supplier-frequency-tag">No habitual</span>}</td><td className="mono">{invoice.number || '—'}</td><td className="numeric">{formatCurrency(invoice.total, invoice.currency)}</td><td><StatusBadge status={invoice.status}/></td><td><button className="icon-button" aria-label="Ver detalle" onClick={() => setDetail(invoice)}><Icon name="eye"/></button></td></tr>)}</tbody></table></div><Pagination page={page} total={invoices.length} pageSize={pageSize} onPage={setPage}/>
     {detail && <Modal title="Cadena documental" onClose={() => setDetail(null)}><div className="invoice-detail"><div className="invoice-detail__hero"><span><Icon name="invoice" size={30}/></span><div><StatusBadge status={detail.status}/><h3>{detail.supplier}</h3><p>{detail.number} · {formatCurrency(detail.total, detail.currency)}</p></div></div><EvidenceChain active={detail.status === 'PROCESADA' ? 5 : 3}/><dl><div><dt>Fecha de emisión</dt><dd>{formatDate(detail.date)}</dd></div><div><dt>CIF / NIF</dt><dd>{detail.taxId || 'Sin dato acreditado'}</dd></div><div><dt>Frecuencia</dt><dd>{detail.nonRegularSupplier ? 'Proveedor no habitual' : 'Proveedor habitual'}</dd></div><div><dt>Archivo original</dt><dd>{detail.originalName}</dd></div><div><dt>Lote</dt><dd className="mono">{detail.batchId}</dd></div><div><dt>Huella</dt><dd className="mono">{detail.hash}</dd></div></dl><div className="link-row">{detail.gmailUrl && <a className="button button--secondary" href={detail.gmailUrl} target="_blank" rel="noreferrer"><Icon name="mail" size={17}/>Correo</a>}{detail.driveUrl && <a className="button button--primary" href={detail.driveUrl} target="_blank" rel="noreferrer"><Icon name="archive" size={17}/>Archivo en Drive</a>}</div></div></Modal>}
   </>;
 }
@@ -342,11 +345,11 @@ function MetricsPage({ snapshot }: PageProps) {
 }
 
 function HistoryPage({ snapshot }: PageProps) {
-  const [query, setQuery] = useState(''); const events = snapshot.audit.filter((event) => `${event.action} ${event.object} ${event.detail} ${event.user}`.toLowerCase().includes(query.toLowerCase()));
+  const [query, setQuery] = useState(''); const [page, setPage] = useState(0); const events = snapshot.audit.filter((event) => `${event.action} ${event.object} ${event.detail} ${event.user}`.toLowerCase().includes(query.toLowerCase())); const pageSize = 25; const visibleEvents = events.slice(page * pageSize, (page + 1) * pageSize);
   return <>
     <SectionHeader eyebrow="Registro inmutable" title="Historial y auditoría" description="Cada decisión conserva actor, momento, objeto y resultado para poder reconstruir el proceso."/>
     <div className="table-toolbar"><label className="search-box"><Icon name="search" size={18}/><input placeholder="Buscar acción, lote, documento o usuario" value={query} onChange={(e) => setQuery(e.target.value)}/></label><span>{events.length} eventos</span></div>
-    <div className="audit-list">{events.map((event) => <article key={event.id}><span className={`audit-level audit-level--${event.level.toLowerCase()}`}><Icon name={event.level === 'ERROR' ? 'error' : event.level === 'WARN' ? 'warning' : 'check'}/></span><div><header><strong>{event.action.replaceAll('_', ' ')}</strong><StatusBadge status={event.level}/></header><p>{event.detail}</p><footer><span className="mono">{event.object}</span><span>{formatDate(event.timestamp, true)}</span><span>{event.user}</span></footer></div></article>)}</div>
+    <div className="audit-list">{visibleEvents.map((event) => <article key={event.id}><span className={`audit-level audit-level--${event.level.toLowerCase()}`}><Icon name={event.level === 'ERROR' ? 'error' : event.level === 'WARN' ? 'warning' : 'check'}/></span><div><header><strong>{event.action.replaceAll('_', ' ')}</strong><StatusBadge status={event.level}/></header><p>{event.detail}</p><footer><span className="mono">{event.object}</span><span>{formatDate(event.timestamp, true)}</span><span>{event.user}</span></footer></div></article>)}</div><Pagination page={page} total={events.length} pageSize={pageSize} onPage={setPage}/>
   </>;
 }
 
@@ -363,6 +366,230 @@ function SettingsPage({ snapshot, updateSnapshot }: PageProps) {
       <div className="settings-card settings-card--wide"><header><span><Icon name="settings"/></span><div><h2>Diagnóstico de fuentes</h2><p>La aplicación falla de forma cerrada si falta una dependencia obligatoria.</p></div></header><div className="service-grid"><Service name="Gmail" detail="compras@reparapro.com · solo lectura" ready={settings.services.gmail}/><Service name="Google Sheets" detail={settings.spreadsheetName} ready={settings.services.sheets}/><Service name="Drive facturas" detail={settings.invoiceFolderName} ready={settings.services.drive}/><Service name="Drive bancos" detail={settings.bankFolderName} ready={settings.services.drive}/></div><div className="trigger-diagnostic"><div><strong>Activadores del proyecto</strong><p>{settings.triggerDiagnosticAvailable === false ? 'Diagnóstico no disponible desde el web app; revísalo en Apps Script.' : settings.triggers?.length ? settings.triggers.map((item) => `${item.handler} · ${item.eventType}`).join(' · ') : 'No hay procesos programados.'}</p></div>{legacyTriggers.length > 0 && <Button variant="danger" icon="warning" onClick={disableLegacy}>Desactivar automatización antigua</Button>}</div></div>
     </section>
   </>;
+}
+
+function ReviewPageV18({ snapshot, updateSnapshot }: PageProps) {
+  const active = snapshot.activeBatch?.documents.filter((item) => item.phase !== 'FINALIZADO' && item.phase !== 'CANCELADO') ?? [];
+  const documents = [...snapshot.reviewDocuments, ...active.filter((item) => !snapshot.reviewDocuments.some((queued) => queued.id === item.id))];
+  const storageKey = `reparapro-review-drafts:${snapshot.settings.user}`;
+  const [drafts, setDrafts] = useState<Record<string, ReviewDraft>>(() => {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem(storageKey) || '{}') as Record<string, ReviewDraft>;
+      return Object.fromEntries(Object.entries(stored).map(([id, draft]) => {
+        const source = documents.find((item) => item.id === id);
+        return source ? [id, { ...draft, document: { ...source, ...draft.document, evidence: source.evidence } }] : [id, draft];
+      }));
+    } catch (_) { return {}; }
+  });
+  const [selectedId, setSelectedId] = useState(documents[0]?.id ?? '');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [preview, setPreview] = useState<{ name: string; url: string; gmailUrl?: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [supplierDraft, setSupplierDraft] = useState<Supplier | null>(null);
+  const [supplierConfirmed, setSupplierConfirmed] = useState(false);
+  const selectedBase = documents.find((item) => item.id === selectedId) ?? documents[0] ?? null;
+  const selected = selectedBase ? drafts[selectedBase.id]?.document ?? selectedBase : null;
+  const selectedReason = selected ? drafts[selected.id]?.reason ?? selected.decisionReason ?? selected.reviewReason : '';
+  const dirtyCount = Object.keys(drafts).length;
+
+  useEffect(() => {
+    const safe = Object.fromEntries(Object.entries(drafts).map(([id, draft]) => [id, {
+      ...draft,
+      document: {
+        id: draft.document.id, supplier: draft.document.supplier, supplierId: draft.document.supplierId,
+        taxId: draft.document.taxId, invoiceNumber: draft.document.invoiceNumber, invoiceDate: draft.document.invoiceDate,
+        operationDate: draft.document.operationDate, dueDate: draft.document.dueDate, categoryId: draft.document.categoryId,
+        taxableBase: draft.document.taxableBase, taxLines: draft.document.taxLines, internalNote: draft.document.internalNote,
+        total: draft.document.total, currency: draft.document.currency, proposedStatus: draft.document.proposedStatus,
+        nonRegularSupplier: draft.document.nonRegularSupplier,
+      },
+    }]));
+    if (Object.keys(safe).length) sessionStorage.setItem(storageKey, JSON.stringify(safe));
+    else sessionStorage.removeItem(storageKey);
+  }, [drafts, storageKey]);
+  useEffect(() => () => { if (preview?.url) URL.revokeObjectURL(preview.url); }, [preview?.url]);
+
+  const edit = (document: InvoiceDocument, reason = selectedReason) => {
+    const base = documents.find((item) => item.id === document.id) ?? document;
+    setDrafts((current) => ({ ...current, [document.id]: current[document.id]
+      ? { ...current[document.id], document, reason, dirtyAt: new Date().toISOString() }
+      : { document, reason, baseUpdatedAt: base.updatedAt ?? '', decisionId: crypto.randomUUID(), dirtyAt: new Date().toISOString() } }));
+    setMessage('');
+  };
+  const syncSaved = (saved: InvoiceDocument[]) => {
+    const savedMap = new Map(saved.map((item) => [item.id, item]));
+    const activeBatch = snapshot.activeBatch ? { ...snapshot.activeBatch, documents: snapshot.activeBatch.documents.map((item) => savedMap.get(item.id) ?? item) } : null;
+    const reviewDocuments = snapshot.reviewDocuments.map((item) => savedMap.get(item.id) ?? item);
+    updateSnapshot({ activeBatch, reviewDocuments });
+  };
+  const saveIds = async (ids: string[]) => {
+    const items = ids.map((id) => drafts[id]).filter(Boolean).slice(0, 20);
+    if (!items.length) { setMessage('No hay cambios pendientes.'); return; }
+    if (items.some((item) => !item.reason.trim())) { setMessage('Todos los cambios necesitan un motivo antes de guardarse.'); return; }
+    setSaving(true); setMessage('');
+    const result = await api.saveDocuments(items);
+    setSaving(false);
+    if (!result.ok || !result.data) { setMessage(result.error?.message ?? 'No se pudieron guardar las decisiones.'); return; }
+    const saved = result.data.items.filter((item) => item.ok && item.document).map((item) => item.document!);
+    syncSaved(saved);
+    setDrafts((current) => {
+      const next = { ...current };
+      result.data!.items.filter((item) => item.ok).forEach((item) => delete next[item.documentId]);
+      return next;
+    });
+    const conflicts = result.data.items.filter((item) => item.error?.code === 'REVIEW_CONFLICT').length;
+    setMessage(`${result.data.saved} guardadas${result.data.failed ? ` · ${result.data.failed} pendientes de reintento` : ''}${conflicts ? ` · ${conflicts} conflictos por cambios concurrentes` : ''} · ${result.data.durationMs} ms`);
+  };
+  const approve = async () => {
+    if (!selected) return;
+    const result = await api.approveDocument(selected.id);
+    if (!result.ok || !result.data) { setMessage(result.error?.message ?? 'No se pudo aprobar el documento.'); return; }
+    const reviewDocuments = snapshot.reviewDocuments.filter((item) => item.id !== selected.id);
+    const activeBatch = snapshot.activeBatch ? { ...snapshot.activeBatch, documents: snapshot.activeBatch.documents.map((item) => item.id === selected.id ? result.data! : item) } : null;
+    updateSnapshot({ activeBatch, reviewDocuments, reviewCount: reviewDocuments.length });
+    setDrafts((current) => { const next = { ...current }; delete next[selected.id]; return next; });
+    setSelectedId(reviewDocuments[0]?.id ?? '');
+  };
+  const openPreview = async () => {
+    if (!selected || previewLoading) return;
+    setPreviewLoading(true); setMessage('');
+    const result = await api.getDocumentPreview(selected);
+    setPreviewLoading(false);
+    if (!result.ok || !result.data) { setMessage(result.error?.message ?? 'No se pudo cargar el PDF.'); return; }
+    setPreview({ name: result.data.originalName, url: pdfObjectUrl(result.data), gmailUrl: result.data.gmailUrl });
+  };
+  const createSupplier = async () => {
+    if (!selected || !supplierDraft || !supplierConfirmed || !supplierDraft.name.trim() || !supplierDraft.evidence.trim()) return;
+    setSaving(true); setMessage('');
+    const result = await api.saveSupplier(supplierDraft);
+    setSaving(false);
+    if (!result.ok || !result.data) { setMessage(result.error?.message ?? 'No se pudo crear el proveedor.'); return; }
+    const supplier = result.data;
+    updateSnapshot({ suppliers: [supplier, ...snapshot.suppliers.filter((item) => item.id !== supplier.id)] });
+    edit({ ...selected, supplierId: supplier.id, supplier: supplier.name, taxId: supplier.taxId || selected.taxId, nonRegularSupplier: false }, `Proveedor ${supplier.name} creado desde ${selected.originalName}. ${supplier.evidence}`);
+    setSupplierDraft(null); setSupplierConfirmed(false);
+  };
+  const addTax = () => selected && edit({ ...selected, taxLines: [...(selected.taxLines ?? []), { id: crypto.randomUUID(), kind: 'IVA', rate: 21, base: 0, amount: 0 }] });
+  const setTax = (index: number, patch: Partial<TaxLine>) => selected && edit({ ...selected, taxLines: (selected.taxLines ?? []).map((line, position) => position === index ? { ...line, ...patch } : line) });
+  const removeTax = (index: number) => selected && edit({ ...selected, taxLines: (selected.taxLines ?? []).filter((_, position) => position !== index) });
+  const matchedSupplier = selected ? snapshot.suppliers.find((item) => item.active && item.id === selected.supplierId) : undefined;
+
+  return <>
+    <SectionHeader eyebrow="Control humano · revisión rápida" title="Revisión manual" description="La clasificación manual se conserva aunque falten datos. Guardar una decisión nunca aprueba la factura." action={dirtyCount > 0 ? <Button icon="check" disabled={saving} onClick={() => saveIds(Object.keys(drafts))}>{saving ? 'Guardando…' : `Guardar todas (${dirtyCount})`}</Button> : undefined}/>
+    {!documents.length ? <EmptyState icon="check" title="No hay revisiones pendientes">Los resultados finalizados siguen disponibles en Facturas.</EmptyState> : <section className="review-layout review-layout--v18">
+      <div className="review-list"><div className="list-toolbar"><strong>{documents.length} pendientes</strong><span>{dirtyCount} sin guardar</span></div>{documents.map((source) => { const doc = drafts[source.id]?.document ?? source; return <button key={doc.id} className={(selected?.id === doc.id ? 'is-active ' : '') + (drafts[doc.id] ? 'is-dirty' : '')} onClick={() => { setSelectedId(doc.id); setMessage(''); }}><span className="file-token"><Icon name="file"/></span><div><strong>{doc.originalName}</strong><p>{doc.supplier || 'Proveedor sin asociar'}</p><small>{activeReviewDecision(doc)?.label ?? doc.proposedStatus}</small>{drafts[doc.id] && <em>Sin guardar</em>}</div><Icon name="chevron" size={17}/></button>; })}</div>
+      {selected && <div className="review-detail"><div className="review-detail__head"><div><p className="eyebrow">Documento · {selected.id}</p><h2>{selected.originalName}</h2><p>{selected.subject}</p></div><div className="review-detail__source-actions"><Button variant="secondary" icon="eye" disabled={previewLoading} onClick={openPreview}>{previewLoading ? 'Cargando…' : 'Previsualizar PDF'}</Button>{selected.gmailUrl && <a className="button button--secondary" href={selected.gmailUrl} target="_blank" rel="noreferrer"><Icon name="mail" size={17}/>Abrir correo</a>}</div></div>
+        <EvidenceChain active={3}/>
+        <div className="review-grid review-grid--enriched">
+          <div className="supplier-association"><Field label="Proveedor"><select value={selected.supplierId ?? ''} onChange={(event) => { const supplier = snapshot.suppliers.find((item) => item.id === event.target.value); edit({ ...selected, supplierId: supplier?.id, supplier: supplier?.name ?? selected.supplier, taxId: supplier?.taxId || selected.taxId, categoryId: selected.categoryId || snapshot.categories.find((category) => category.supplierIds.includes(supplier?.id ?? ''))?.id }); }}><option value="">Sin asociar</option>{snapshot.suppliers.filter((item) => item.active).map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name} · {supplier.invoiceCount} facturas</option>)}</select></Field>{!selected.supplierId && <Button variant="quiet" icon="plus" onClick={() => { setSupplierDraft(supplierDraftFromDocument(selected)); setSupplierConfirmed(false); }}>Crear proveedor desde este PDF</Button>}{(!matchedSupplier || matchedSupplier.invoiceCount < 3) && <label className="compact-check"><input type="checkbox" aria-label="Marcar como proveedor no habitual" checked={Boolean(selected.nonRegularSupplier)} onChange={(event) => edit({ ...selected, nonRegularSupplier: event.target.checked })}/><span>Marcar como proveedor no habitual</span></label>}{selected.nonRegularSupplier && !matchedSupplier && <Field label="Nombre del proveedor en la factura"><input value={selected.supplier} onChange={(event) => edit({ ...selected, supplier: event.target.value })}/></Field>}</div>
+          <Field label="CIF / NIF"><input value={selected.taxId} onChange={(event) => edit({ ...selected, taxId: event.target.value })}/></Field>
+          <Field label="Número de factura"><input value={selected.invoiceNumber} onChange={(event) => edit({ ...selected, invoiceNumber: event.target.value })}/></Field>
+          <Field label="Fecha de emisión"><input type="date" value={selected.invoiceDate} onChange={(event) => edit({ ...selected, invoiceDate: event.target.value })}/></Field>
+          <Field label="Fecha de operación" hint="Opcional"><input type="date" value={selected.operationDate ?? ''} onChange={(event) => edit({ ...selected, operationDate: event.target.value })}/></Field>
+          <Field label="Fecha de vencimiento" hint="Opcional"><input type="date" value={selected.dueDate ?? ''} onChange={(event) => edit({ ...selected, dueDate: event.target.value })}/></Field>
+          <Field label="Categoría"><select value={selected.categoryId ?? ''} onChange={(event) => edit({ ...selected, categoryId: event.target.value })}><option value="">Sin categoría</option>{snapshot.categories.filter((category) => category.active || category.id === selected.categoryId).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></Field>
+          <Field label="Base imponible"><input type="number" step="0.01" value={selected.taxableBase ?? ''} onChange={(event) => edit({ ...selected, taxableBase: event.target.value === '' ? null : Number(event.target.value) })}/></Field>
+          <Field label="Total con impuestos"><input type="number" step="0.01" value={selected.total ?? ''} onChange={(event) => edit({ ...selected, total: event.target.value === '' ? null : Number(event.target.value) })}/></Field>
+          <Field label="Moneda"><input maxLength={3} value={selected.currency} onChange={(event) => edit({ ...selected, currency: event.target.value.toUpperCase() })}/></Field>
+        </div>
+        <section className="tax-editor"><div className="subhead"><div><h3>Líneas fiscales</h3><p>Solo añade importes acreditados en la factura.</p></div><Button variant="secondary" icon="plus" onClick={addTax}>Añadir línea</Button></div>{(selected.taxLines ?? []).map((line, index) => <div className="tax-line" key={line.id}><select aria-label="Tipo de impuesto" value={line.kind} onChange={(event) => setTax(index, { kind: event.target.value as TaxLine['kind'] })}><option>IVA</option><option>IGIC</option><option value="RETENCION">Retención</option><option value="OTRO">Otro</option></select><input aria-label="Tipo porcentual" type="number" step="0.01" value={line.rate} onChange={(event) => setTax(index, { rate: Number(event.target.value) })}/><input aria-label="Base" type="number" step="0.01" value={line.base} onChange={(event) => setTax(index, { base: Number(event.target.value) })}/><input aria-label="Importe fiscal" type="number" step="0.01" value={line.amount} onChange={(event) => setTax(index, { amount: Number(event.target.value) })}/><button className="icon-button" aria-label="Eliminar línea fiscal" onClick={() => removeTax(index)}><Icon name="close"/></button></div>)}</section>
+        <Field label="Nota interna acreditada" hint="No inventes información que no figure en el documento o correo"><textarea rows={2} value={selected.internalNote ?? ''} onChange={(event) => edit({ ...selected, internalNote: event.target.value })}/></Field>
+        <Field label="Motivo de la decisión" hint="Obligatorio para guardar"><textarea rows={3} value={selectedReason} onChange={(event) => edit(selected, event.target.value)}/></Field>
+        <div className="decision-control"><div className="decision-control__head"><strong>Clasificación manual</strong><span>Los errores de datos no cambiarán esta elección.</span></div><div className="decision-control__options">{reviewDecisions.map((decision) => <Button key={decision.key} variant={activeReviewDecision(selected)?.key === decision.key ? 'primary' : 'secondary'} aria-pressed={activeReviewDecision(selected)?.key === decision.key} onClick={() => { const total = decision.creditNote && selected.total !== null ? -Math.abs(selected.total) : selected.total; edit({ ...selected, proposedStatus: decision.status, total }); }}>{decision.label}</Button>)}</div></div>
+        <p className="decision-feedback" role="status"><Icon name="check" size={17}/><span><strong>Decisión preparada:</strong> {activeReviewDecision(selected)?.label}{selected.nonRegularSupplier ? ' · Proveedor no habitual' : ''}. Se aplicará al guardar.</span></p>
+        {Boolean(selected.validationErrors?.length) && <div className="validation-panel" role="alert"><strong>Datos que bloquean la aprobación</strong><ul>{selected.validationErrors!.map((error) => <li key={error}>{error}</li>)}</ul></div>}
+        {message && <p className="inline-note" role="status"><Icon name="warning" size={16}/>{message}</p>}
+        <div className="review-actions"><Button variant="secondary" disabled={!drafts[selected.id] || saving} onClick={() => { setDrafts((current) => { const next = { ...current }; delete next[selected.id]; return next; }); setMessage('Cambios descartados.'); }}>Descartar cambios</Button><Button aria-label="Guardar decisión" icon="check" disabled={!drafts[selected.id] || saving} onClick={() => saveIds([selected.id])}>{saving ? 'Guardando…' : 'Guardar esta decisión'}</Button>{selected.phase === 'LISTO PARA APROBAR' && !drafts[selected.id] && <Button icon="archive" onClick={approve}>Aprobar documento</Button>}</div>
+      </div>}
+    </section>}
+    {preview && <Modal title={`Vista previa · ${preview.name}`} size="wide" onClose={() => setPreview(null)} footer={<><a className="button button--secondary" href={preview.url} target="_blank" rel="noreferrer"><Icon name="eye" size={17}/>Abrir en otra pestaña</a>{preview.gmailUrl && <a className="button button--secondary" href={preview.gmailUrl} target="_blank" rel="noreferrer"><Icon name="mail" size={17}/>Ver correo de origen</a>}<Button onClick={() => setPreview(null)}>Cerrar</Button></>}><div className="pdf-preview"><iframe title={`PDF ${preview.name}`} src={preview.url}/></div></Modal>}
+    {supplierDraft && selected && <Modal title="Crear proveedor desde este documento" onClose={() => !saving && setSupplierDraft(null)} footer={<><Button variant="secondary" disabled={saving} onClick={() => setSupplierDraft(null)}>Cancelar</Button><Button icon="check" disabled={saving || !supplierConfirmed || !supplierDraft.name.trim() || !supplierDraft.evidence.trim()} onClick={createSupplier}>{saving ? 'Creando…' : 'Crear y asociar'}</Button></>}><div className="form-stack"><div className="source-evidence-card"><span><Icon name="search" size={18}/></span><div><strong>Fuente de los datos</strong><p>{selected.originalName} · {selected.sender}</p><small>Crear el proveedor no aprueba la factura.</small></div></div><Field label="Nombre canónico"><input autoFocus value={supplierDraft.name} onChange={(event) => setSupplierDraft({ ...supplierDraft, name: event.target.value })}/></Field><div className="form-grid"><Field label="Dominio confirmado"><input value={supplierDraft.domain} onChange={(event) => setSupplierDraft({ ...supplierDraft, domain: event.target.value.toLowerCase() })}/></Field><Field label="CIF / NIF"><input value={supplierDraft.taxId} onChange={(event) => setSupplierDraft({ ...supplierDraft, taxId: event.target.value.toUpperCase() })}/></Field></div><Field label="Aliases acreditados"><input value={supplierDraft.aliases.join('; ')} onChange={(event) => setSupplierDraft({ ...supplierDraft, aliases: event.target.value.split(';').map((value) => value.trim()).filter(Boolean) })}/></Field><Field label="Evidencia" hint="Documento y fragmento concreto que acreditan los datos"><textarea rows={3} value={supplierDraft.evidence} onChange={(event) => setSupplierDraft({ ...supplierDraft, evidence: event.target.value })}/></Field><label className="evidence-confirmation"><input type="checkbox" checked={supplierConfirmed} onChange={(event) => setSupplierConfirmed(event.target.checked)}/><span><strong>He comprobado los datos</strong><small>Los datos introducidos aparecen en el PDF o correo.</small></span></label></div></Modal>}
+  </>;
+}
+
+function BankPageV18(props: PageProps) {
+  return <><BankPage {...props}/><ReconciliationMatrix {...props}/></>;
+}
+
+function ReconciliationMatrix({ snapshot, updateSnapshot }: PageProps) {
+  const confirmedImports = snapshot.bankImports.filter((item) => item.status === 'CONFIRMADA');
+  const [importId, setImportId] = useState(confirmedImports[0]?.id ?? '');
+  const [direction, setDirection] = useState<'MOVEMENT' | 'INVOICE'>('MOVEMENT');
+  const [movementId, setMovementId] = useState('');
+  const [invoiceId, setInvoiceId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+  const [allowDifference, setAllowDifference] = useState(false);
+  const [working, setWorking] = useState(false);
+  const [message, setMessage] = useState('');
+  const bankImport = confirmedImports.find((item) => item.id === importId);
+  const movement = bankImport?.movements.find((item) => item.id === movementId);
+  const invoice = snapshot.invoices.find((item) => item.id === invoiceId);
+  const allocated = Number(amount || 0);
+  const total = direction === 'MOVEMENT' ? Math.abs(movement?.amount ?? 0) : Math.abs(invoice?.total ?? 0);
+  const alreadyAssigned = direction === 'MOVEMENT' ? Math.abs(movement?.assignedAmount ?? 0) : Math.abs(invoice?.assignedAmount ?? 0);
+  const difference = total - alreadyAssigned - Math.abs(allocated);
+  const save = async () => {
+    if (!bankImport || !movement || !invoice || allocated <= 0) { setMessage('Selecciona movimiento, factura e importe asignado.'); return; }
+    setWorking(true); setMessage('');
+    const result = await api.saveReconciliationLinks(bankImport.id, [{ movementId: movement.id, invoiceId: invoice.id, allocatedAmount: allocated, evidence: `Importe ${movement.amount} ${movement.currency}; factura ${invoice.number}; referencia ${movement.reference || 'sin referencia'}` }], reason, allowDifference);
+    setWorking(false);
+    if (!result.ok || !result.data) { setMessage(result.error?.message ?? 'No se pudo confirmar la relación.'); return; }
+    updateSnapshot({ bankImports: snapshot.bankImports.map((item) => item.id === result.data!.id ? result.data! : item) });
+    setAmount(''); setReason(''); setMessage('Relación confirmada y saldos recalculados.');
+  };
+  const undo = async (link: ReconciliationLink) => {
+    const undoReason = window.prompt('Motivo para deshacer la conciliación');
+    if (!undoReason?.trim() || !bankImport) return;
+    const result = await api.undoReconciliation(bankImport.id, link.id, undoReason.trim());
+    if (result.ok && result.data) updateSnapshot({ bankImports: snapshot.bankImports.map((item) => item.id === result.data!.id ? result.data! : item) });
+    else setMessage(result.error?.message ?? 'No se pudo deshacer.');
+  };
+  const exclude = async (targetType: 'MOVEMENT' | 'INVOICE') => {
+    const targetId = targetType === 'MOVEMENT' ? movementId : invoiceId;
+    if (!bankImport || !targetId || !reason.trim()) { setMessage('Selecciona el elemento e indica un motivo para excluirlo.'); return; }
+    setWorking(true);
+    const result = await api.saveReconciliationException(bankImport.id, targetType, targetId, reason.trim());
+    setWorking(false);
+    if (result.ok && result.data) { updateSnapshot({ bankImports: snapshot.bankImports.map((item) => item.id === result.data!.id ? result.data! : item) }); setMessage(targetType === 'MOVEMENT' ? 'Movimiento marcado como excluido con motivo.' : 'Factura marcada como pagada fuera de este extracto.'); setReason(''); }
+    else setMessage(result.error?.message ?? 'No se pudo guardar la excepción.');
+  };
+  return <section className="reconciliation reconciliation-matrix"><div className="subhead"><div><p className="eyebrow">Matriz avanzada</p><h2>Asignar pagos y facturas</h2><p>Las propuestas nunca se aplican solas. Puedes crear relaciones 1:1, 1:N o N:1.</p></div><div className="segmented"><button className={direction === 'MOVEMENT' ? 'is-active' : ''} onClick={() => setDirection('MOVEMENT')}>Movimiento → Factura</button><button className={direction === 'INVOICE' ? 'is-active' : ''} onClick={() => setDirection('INVOICE')}>Factura → Movimiento</button></div></div>
+    {!confirmedImports.length ? <EmptyState icon="bank" title="Confirma un extracto para conciliar">Las vistas previas no admiten relaciones definitivas.</EmptyState> : <><div className="matrix-form"><Field label="Extracto"><select value={importId} onChange={(event) => setImportId(event.target.value)}>{confirmedImports.map((item) => <option key={item.id} value={item.id}>{item.fileName} · {item.coverage}</option>)}</select></Field><Field label="Movimiento"><select value={movementId} onChange={(event) => { setMovementId(event.target.value); const match = bankImport?.movements.find((item) => item.id === event.target.value); setAmount(match ? String(Math.abs(match.difference ?? match.amount)) : ''); }}><option value="">Seleccionar</option>{bankImport?.movements.filter((item) => item.type === 'CARGO' || item.type === 'REVISIÓN').map((item) => <option key={item.id} value={item.id}>{formatDate(item.operationDate)} · {item.concept} · {formatCurrency(item.amount, item.currency)}</option>)}</select></Field><Field label="Factura"><select value={invoiceId} onChange={(event) => { setInvoiceId(event.target.value); const match = snapshot.invoices.find((item) => item.id === event.target.value); if (match) setAmount(String(Math.abs(match.total - (match.assignedAmount ?? 0)))); }}><option value="">Seleccionar</option>{snapshot.invoices.filter((item) => item.status === 'PROCESADA').map((item) => <option key={item.id} value={item.id}>{item.supplier} · {item.number} · {formatCurrency(item.total, item.currency)}</option>)}</select></Field><Field label="Importe asignado"><input type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)}/></Field></div>
+      <div className="allocation-summary"><SummaryNumber label="TOTAL" value={formatCurrency(total, movement?.currency || invoice?.currency || 'EUR')}/><SummaryNumber label="ASIGNADO" value={formatCurrency(alreadyAssigned + Math.abs(allocated), movement?.currency || invoice?.currency || 'EUR')}/><SummaryNumber label="DIFERENCIA" value={formatCurrency(difference, movement?.currency || invoice?.currency || 'EUR')}/></div>
+      <div className="matrix-decision"><Field label="Motivo o diferencia justificada"><input placeholder="Comisión, redondeo, pago parcial…" value={reason} onChange={(event) => setReason(event.target.value)}/></Field><label className="compact-check"><input type="checkbox" checked={allowDifference} onChange={(event) => setAllowDifference(event.target.checked)}/><span>Confirmo una asignación que supera el saldo y dejo motivo</span></label><Button icon="check" disabled={working || !movementId || !invoiceId || allocated <= 0 || (difference < -0.01 && (!allowDifference || !reason.trim()))} onClick={save}>{working ? 'Confirmando…' : 'Confirmar relación'}</Button></div>
+      <div className="exception-actions"><span>Excepciones justificadas</span><Button variant="secondary" disabled={working || !movementId || !reason.trim()} onClick={() => exclude('MOVEMENT')}>Movimiento sin factura</Button><Button variant="secondary" disabled={working || !invoiceId || !reason.trim()} onClick={() => exclude('INVOICE')}>Factura pagada fuera del extracto</Button></div>
+      {message && <p className="inline-note"><Icon name="warning" size={16}/>{message}</p>}
+      <div className="link-list">{(bankImport?.reconciliations ?? []).filter((link) => link.status === 'CONFIRMADA').map((link) => { const linkedMovement = bankImport?.movements.find((item) => item.id === link.movementId); const linkedInvoice = snapshot.invoices.find((item) => item.id === link.invoiceId); return <article key={link.id}><div><strong>{linkedMovement?.concept}</strong><small>{linkedInvoice?.supplier} · {linkedInvoice?.number}</small></div><b>{formatCurrency(link.allocatedAmount, linkedMovement?.currency)}</b><span>{link.evidence}</span><Button variant="quiet" onClick={() => undo(link)}>Deshacer</Button></article>; })}</div></>}
+  </section>;
+}
+
+function MonthlyClosePage({ snapshot, updateSnapshot }: PageProps) {
+  const initialPeriod = new Date().toISOString().slice(0, 7);
+  const [period, setPeriod] = useState(initialPeriod);
+  const [close, setClose] = useState<MonthlyClose | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  const [confirmExport, setConfirmExport] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<ExpenseCategory | null>(null);
+  const load = async () => { setLoading(true); setMessage(''); const result = await api.getMonthlyClose(period); setLoading(false); if (result.ok && result.data) setClose(result.data); else setMessage(result.error?.message ?? 'No se pudo calcular el cierre.'); };
+  const createExport = async () => { if (!close) return; setLoading(true); setConfirmExport(false); const result = await api.createAccountantExport(period, close.coverage); setLoading(false); if (result.ok && result.data) { updateSnapshot({ exports: [result.data, ...(snapshot.exports ?? [])] }); setMessage(`Exportación completada: ${result.data.files.length} archivos.`); } else setMessage(result.error?.message ?? 'No se pudo generar la exportación.'); };
+  const saveCategory = async () => { if (!editingCategory?.name.trim()) return; const result = await api.saveCategory(editingCategory); if (result.ok && result.data) { const categories = snapshot.categories.some((item) => item.id === result.data!.id) ? snapshot.categories.map((item) => item.id === result.data!.id ? result.data! : item) : [...snapshot.categories, result.data]; updateSnapshot({ categories }); setEditingCategory(null); } else setMessage(result.error?.message ?? 'No se pudo guardar la categoría.'); };
+  return <>
+    <SectionHeader eyebrow="Entrega controlada" title="Cierre mensual y gestoría" description="El cierre resume la cobertura disponible. Un extracto parcial nunca declara el mes cerrado." action={<div className="period-action"><input aria-label="Periodo" type="month" value={period} onChange={(event) => setPeriod(event.target.value)}/><Button icon="refresh" disabled={loading} onClick={load}>{loading ? 'Calculando…' : 'Calcular cierre'}</Button></div>}/>
+    {!close ? <EmptyState icon="archive" title="Selecciona un periodo">Calcula el cierre antes de generar cualquier entrega.</EmptyState> : <><section className="close-summary"><SummaryNumber label="Facturas procesadas" value={close.invoices}/><SummaryNumber label="En revisión" value={close.reviews}/><SummaryNumber label="Conciliadas" value={close.reconciled}/><SummaryNumber label="Parciales" value={close.partial}/><SummaryNumber label="Sin justificante" value={close.movementsWithoutInvoice}/><SummaryNumber label="Sin movimiento" value={close.invoicesWithoutMovement}/></section>{close.warnings.map((warning) => <p className="inline-note" key={warning}><Icon name="warning" size={16}/>{warning}</p>)}<section className="close-financials"><div><span>Base imponible</span><strong>{formatCurrency(close.taxableBase)}</strong></div><div><span>Impuestos</span><strong>{formatCurrency(close.taxes)}</strong></div><div><span>Retenciones</span><strong>{formatCurrency(close.withholdings)}</strong></div><div><span>Total documentado</span><strong>{formatCurrency(close.total)}</strong></div></section><div className="data-table"><table><thead><tr><th>Categoría</th><th>Facturas</th><th className="numeric">Total</th></tr></thead><tbody>{close.byCategory.map((row) => <tr key={row.categoryId}><td>{row.category}</td><td>{row.count}</td><td className="numeric">{formatCurrency(row.total)}</td></tr>)}</tbody></table></div><div className="close-actions"><p><strong>Cobertura:</strong> {close.coverage}</p><Button icon="download" onClick={() => setConfirmExport(true)}>Preparar entrega a gestoría</Button></div></>}
+    {message && <p className="inline-note"><Icon name="warning" size={16}/>{message}</p>}
+    <section className="category-manager"><div className="subhead"><div><p className="eyebrow">Catálogo editable</p><h2>Categorías de gasto</h2><p>Renombrar o desactivar nunca altera el histórico.</p></div><Button icon="plus" onClick={() => setEditingCategory({ id: '', name: '', active: true, supplierIds: [], updatedAt: '', updatedBy: '' })}>Nueva categoría</Button></div><div className="category-list">{snapshot.categories.map((category) => <article key={category.id} className={category.active ? '' : 'is-inactive'}><div><strong>{category.name}</strong><small>{category.supplierIds.length} proveedores con sugerencia predeterminada</small></div><StatusBadge status={category.active ? 'ACTIVA' : 'INACTIVA'}/><Button variant="quiet" onClick={() => setEditingCategory(category)}>Editar</Button></article>)}</div></section>
+    {editingCategory && <Modal title={editingCategory.id ? 'Editar categoría' : 'Nueva categoría'} onClose={() => setEditingCategory(null)} footer={<><Button variant="secondary" onClick={() => setEditingCategory(null)}>Cancelar</Button><Button icon="check" disabled={!editingCategory.name.trim()} onClick={saveCategory}>Guardar categoría</Button></>}><div className="form-stack"><Field label="Nombre"><input autoFocus value={editingCategory.name} onChange={(event) => setEditingCategory({ ...editingCategory, name: event.target.value })}/></Field><label className="compact-check"><input type="checkbox" checked={editingCategory.active} onChange={(event) => setEditingCategory({ ...editingCategory, active: event.target.checked })}/><span>Categoría activa</span></label><Field label="Proveedores con esta sugerencia"><select multiple size={8} value={editingCategory.supplierIds} onChange={(event) => setEditingCategory({ ...editingCategory, supplierIds: Array.from(event.target.selectedOptions).map((option) => option.value) })}>{snapshot.suppliers.filter((item) => item.active).map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></Field></div></Modal>}
+    {confirmExport && close && <Modal title="Confirmar entrega a gestoría" onClose={() => setConfirmExport(false)} footer={<><Button variant="secondary" onClick={() => setConfirmExport(false)}>Cancelar</Button><Button icon="archive" onClick={createExport}>Generar exportación</Button></>}><div className="confirmation"><span><Icon name="archive" size={28}/></span><h3>{period}</h3><p>Se crearán XLSX, manifiesto con hashes y ZIP con los PDFs en EXPORTACIONES GESTORÍA. Los originales no se modificarán.</p><p><strong>Cobertura:</strong> {close.coverage}</p></div></Modal>}
+  </>;
+}
+
+function Pagination({ page, total, pageSize, onPage }: { page: number; total: number; pageSize: number; onPage: (page: number) => void }) {
+  if (total <= pageSize) return null;
+  const pages = Math.ceil(total / pageSize);
+  return <nav className="pagination" aria-label="Paginación"><Button variant="secondary" disabled={page === 0} onClick={() => onPage(page - 1)}>Anterior</Button><span>Página {page + 1} de {pages}</span><Button variant="secondary" disabled={page >= pages - 1} onClick={() => onPage(page + 1)}>Siguiente</Button></nav>;
 }
 
 function Service({ name, detail, ready }: { name: string; detail: string; ready: boolean }) { return <div><span><Icon name={ready ? 'check' : 'error'} size={17}/></span><div><strong>{name}</strong><p>{detail}</p></div><StatusBadge status={ready ? 'CONECTADO' : 'NO DISPONIBLE'}/></div>; }

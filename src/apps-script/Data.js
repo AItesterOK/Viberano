@@ -84,6 +84,11 @@ function setupSchema_(user, requestId) {
     const config = getConfigMap_();
     if (config[row[0]] === undefined || config[row[0]] === '') upsertConfig_(row[0], row[1], row[2]);
   });
+  if (!getRows_(APP.SHEETS.CATEGORIES).length) {
+    DEFAULT_CATEGORIES.forEach(function (name) {
+      appendObject_(APP.SHEETS.CATEGORIES, { CATEGORIA_ID: 'CAT-' + uuid_(), NOMBRE: name, ACTIVA: true, PROVEEDORES_JSON: '[]', ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, REQUEST_ID: requestId });
+    });
+  }
   logEvent_('INFO', 'SCHEMA_MIGRATED', APP.SPREADSHEET_ID, 'Migración aditiva completada', { backupId: backup.id, report: report }, '', requestId, user);
   return { backup: { id: backup.id, name: backup.name, url: backup.webViewLink || ('https://docs.google.com/spreadsheets/d/' + backup.id) }, report: report };
 }
@@ -110,12 +115,22 @@ function providerFromRow_(row) {
 function documentFromRow_(row) {
   return {
     id: String(row.DOCUMENTO_ID || ''), batchId: String(row.LOTE_ID || ''), messageId: String(row.MESSAGE_ID || ''), attachmentId: String(row.ATTACHMENT_ID || ''), originalName: String(row.NOMBRE_ORIGINAL || ''),
-    sender: String(row.REMITENTE || ''), recipients: String(row.DESTINATARIOS || ''), emailDirection: String(row.DIRECCION_CORREO || '') || undefined, subject: String(row.ASUNTO || ''), emailDate: String(row.FECHA_CORREO || ''), invoiceDate: parseDate_(row.FECHA_FACTURA), supplier: String(row.PROVEEDOR || ''), supplierId: String(row.PROVEEDOR_ID || ''), taxId: String(row.CIF_NIF || ''), invoiceNumber: String(row.NUMERO_FACTURA || ''), total: row.IMPORTE_TOTAL === '' ? null : Number(row.IMPORTE_TOTAL), currency: String(row.MONEDA || ''), phase: String(row.FASE || 'PENDIENTE'), proposedStatus: String(row.ESTADO_PROPUESTO || 'REVISIÓN MANUAL'), finalStatus: String(row.ESTADO_FINAL || '') || undefined, reviewReason: String(row.MOTIVO_REVISION || ''), evidence: safeJsonParse_(row.EVIDENCIA_JSON, []), hash: String(row.HASH_PDF || ''), gmailUrl: String(row.GMAIL_URL || ''), driveUrl: String(row.URL_DRIVE || '') || undefined, selected: toBoolean_(row.SELECCIONADO), nonRegularSupplier: toBoolean_(row.PROVEEDOR_NO_HABITUAL), error: String(row.ERROR || ''), __row: row.__row,
+    sender: String(row.REMITENTE || ''), recipients: String(row.DESTINATARIOS || ''), emailDirection: String(row.DIRECCION_CORREO || '') || undefined, subject: String(row.ASUNTO || ''), emailDate: String(row.FECHA_CORREO || ''), invoiceDate: parseDate_(row.FECHA_FACTURA), operationDate: parseDate_(row.FECHA_OPERACION), dueDate: parseDate_(row.FECHA_VENCIMIENTO), categoryId: String(row.CATEGORIA_ID || ''), taxableBase: row.BASE_IMPONIBLE === '' ? null : Number(row.BASE_IMPONIBLE), taxLines: safeJsonParse_(row.IMPUESTOS_JSON, []), internalNote: String(row.NOTA_INTERNA || ''), supplier: String(row.PROVEEDOR || ''), supplierId: String(row.PROVEEDOR_ID || ''), taxId: String(row.CIF_NIF || ''), invoiceNumber: String(row.NUMERO_FACTURA || ''), total: row.IMPORTE_TOTAL === '' ? null : Number(row.IMPORTE_TOTAL), currency: String(row.MONEDA || ''), phase: String(row.FASE || 'PENDIENTE'), proposedStatus: String(row.ESTADO_PROPUESTO || 'REVISIÓN MANUAL'), finalStatus: String(row.ESTADO_FINAL || '') || undefined, reviewReason: String(row.MOTIVO_REVISION || ''), decisionReason: String(row.MOTIVO_DECISION || ''), validationErrors: safeJsonParse_(row.ERRORES_VALIDACION_JSON, []), updatedAt: String(row.ACTUALIZADO_EN || ''), evidence: safeJsonParse_(row.EVIDENCIA_JSON, []), hash: String(row.HASH_PDF || ''), gmailUrl: String(row.GMAIL_URL || ''), driveUrl: String(row.URL_DRIVE || '') || undefined, selected: toBoolean_(row.SELECCIONADO), nonRegularSupplier: toBoolean_(row.PROVEEDOR_NO_HABITUAL), error: String(row.ERROR || ''), __row: row.__row,
   };
 }
 
 function invoiceFromRow_(row) {
-  return { id: String(row.ID_UNICO || ('invoice-row-' + row.__row)), date: parseDate_(row.FECHA_FACTURA), supplier: String(row.PROVEEDOR || ''), taxId: String(row.CIF_NIF || ''), number: String(row['NÚMERO_FACTURA'] || ''), total: Number(row.IMPORTE_TOTAL || 0), currency: String(row.MONEDA || ''), status: String(row.ESTADO || ''), driveUrl: String(row.URL_DRIVE || ''), gmailUrl: String(row.REFERENCIA_CORREO || ''), originalName: String(row.NOMBRE_ORIGINAL || ''), batchId: String(row.LOTE_ID || ''), hash: String(row.HASH_PDF || ''), nonRegularSupplier: toBoolean_(row.PROVEEDOR_NO_HABITUAL), __row: row.__row };
+  return { id: String(row.ID_UNICO || ('invoice-row-' + row.__row)), date: parseDate_(row.FECHA_FACTURA), operationDate: parseDate_(row.FECHA_OPERACION), dueDate: parseDate_(row.FECHA_VENCIMIENTO), categoryId: String(row.CATEGORIA_ID || ''), taxableBase: row.BASE_IMPONIBLE === '' ? null : Number(row.BASE_IMPONIBLE), taxLines: safeJsonParse_(row.IMPUESTOS_JSON, []), internalNote: String(row.NOTA_INTERNA || ''), reconciliationStatus: String(row.ESTADO_CONCILIACION || 'SIN CONCILIAR'), assignedAmount: Number(row.IMPORTE_ASIGNADO || 0), supplier: String(row.PROVEEDOR || ''), taxId: String(row.CIF_NIF || ''), number: String(row['NÚMERO_FACTURA'] || ''), total: Number(row.IMPORTE_TOTAL || 0), currency: String(row.MONEDA || ''), status: String(row.ESTADO || ''), driveUrl: String(row.URL_DRIVE || ''), gmailUrl: String(row.REFERENCIA_CORREO || ''), originalName: String(row.NOMBRE_ORIGINAL || ''), batchId: String(row.LOTE_ID || ''), hash: String(row.HASH_PDF || ''), nonRegularSupplier: toBoolean_(row.PROVEEDOR_NO_HABITUAL), __row: row.__row };
+}
+
+function categoryFromRow_(row) {
+  return { id: String(row.CATEGORIA_ID || ''), name: String(row.NOMBRE || ''), active: toBoolean_(row.ACTIVA), supplierIds: safeJsonParse_(row.PROVEEDORES_JSON, []), updatedAt: String(row.ACTUALIZADO_EN || ''), updatedBy: String(row.ACTUALIZADO_POR || ''), __row: row.__row };
+}
+
+function categories_() { return safeRows_(APP.SHEETS.CATEGORIES).map(categoryFromRow_); }
+
+function exportFromRow_(row) {
+  return { id: String(row.EXPORTACION_ID || ''), period: String(row.PERIODO || ''), status: String(row.ESTADO || ''), folderUrl: String(row.CARPETA_URL || '') || undefined, files: safeJsonParse_(row.ARCHIVOS_JSON, []), manifestHash: String(row.MANIFEST_HASH || '') || undefined, createdAt: String(row.CREADO_EN || ''), createdBy: String(row.CREADO_POR || ''), error: String(row.ERROR || '') || undefined };
 }
 
 function batchFromRow_(row) {

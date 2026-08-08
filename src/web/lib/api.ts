@@ -1,4 +1,4 @@
-import type { ApiResult, AppSnapshot, BankImport, Batch, DocumentPreview, InvoiceDocument, Supplier } from '../types';
+import type { AccountantExport, ApiResult, AppSnapshot, BankImport, Batch, DocumentPreview, ExpenseCategory, InvoiceDocument, MonthlyClose, ReconciliationLink, ReviewDraft, ReviewSaveResult, Supplier } from '../types';
 import { createMockSnapshot } from './mockData';
 import { buildMonthlyMetrics, validateInvoice } from './domain';
 
@@ -78,7 +78,71 @@ export const api = {
   },
 
   async saveDocument(document: InvoiceDocument, reason: string): Promise<ApiResult<InvoiceDocument>> {
-    if (serverAvailable()) return callServer<InvoiceDocument>('apiSaveDocumentReview', { document, reason, requestId: requestId() });
+    const bulk = await this.saveDocuments([{ document, reason, baseUpdatedAt: document.updatedAt ?? '', decisionId: requestId(), dirtyAt: new Date().toISOString() }]);
+    const item = bulk.data?.items[0];
+    return item?.ok && item.document ? { ok: true, data: item.document, requestId: bulk.requestId } : { ok: false, error: item?.error ?? bulk.error ?? { code: 'SAVE_FAILED', message: 'No se pudo guardar la decisión' }, requestId: bulk.requestId };
+  },
+
+  async saveDocuments(drafts: ReviewDraft[]): Promise<ApiResult<ReviewSaveResult>> {
+    if (serverAvailable()) return callServer<ReviewSaveResult>('apiSaveDocumentReviews', { items: drafts.map((draft) => ({ document: draft.document, reason: draft.reason, baseUpdatedAt: draft.baseUpdatedAt, decisionId: draft.decisionId })), requestId: requestId() });
+    await delay(420);
+    const started = performance.now();
+    const items = drafts.map((draft) => {
+      const current = mock.reviewDocuments.find((item) => item.id === draft.document.id) ?? mock.activeBatch?.documents.find((item) => item.id === draft.document.id);
+      if (current?.updatedAt && draft.baseUpdatedAt && current.updatedAt !== draft.baseUpdatedAt) return { documentId: draft.document.id, ok: false, ready: false, error: { code: 'REVIEW_CONFLICT', message: 'La factura cambió desde que abriste la revisión.' } };
+      const errors = draft.document.proposedStatus === 'PROCESADA' ? validateInvoice(draft.document, mock.suppliers) : [];
+      const updated: InvoiceDocument = { ...draft.document, decisionReason: draft.reason, reviewReason: errors.join('; '), validationErrors: errors, phase: errors.length || draft.document.proposedStatus === 'REVISIÓN MANUAL' ? 'EN REVISIÓN' : 'LISTO PARA APROBAR', selected: !errors.length && draft.document.proposedStatus !== 'REVISIÓN MANUAL', updatedAt: new Date().toISOString() };
+      if (mock.activeBatch) mock.activeBatch = { ...mock.activeBatch, documents: mock.activeBatch.documents.map((item) => item.id === updated.id ? updated : item) };
+      mock.reviewDocuments = mock.reviewDocuments.map((item) => item.id === updated.id ? updated : item);
+      return { documentId: updated.id, ok: true, ready: updated.phase === 'LISTO PARA APROBAR', document: updated };
+    });
+    return ok({ items, saved: items.filter((item) => item.ok).length, failed: items.filter((item) => !item.ok).length, durationMs: Math.round(performance.now() - started) });
+  },
+
+  async saveCategory(category: ExpenseCategory): Promise<ApiResult<ExpenseCategory>> {
+    if (serverAvailable()) return callServer<ExpenseCategory>('apiSaveCategory', { category, requestId: requestId() });
+    await delay();
+    const saved = { ...category, id: category.id || `cat-${requestId()}`, updatedAt: new Date().toISOString(), updatedBy: mock.settings.user };
+    mock.categories = mock.categories.some((item) => item.id === saved.id) ? mock.categories.map((item) => item.id === saved.id ? saved : item) : [saved, ...mock.categories];
+    return ok(structuredClone(saved));
+  },
+
+  async saveReconciliationLinks(importId: string, links: Pick<ReconciliationLink, 'movementId' | 'invoiceId' | 'allocatedAmount' | 'evidence'>[], reason = '', allowDifference = false): Promise<ApiResult<BankImport>> {
+    if (serverAvailable()) return callServer<BankImport>('apiSaveReconciliationLinks', { importId, links, reason, allowDifference, requestId: requestId() });
+    await delay();
+    const bankImport = mock.bankImports.find((item) => item.id === importId)!;
+    bankImport.reconciliations = [...(bankImport.reconciliations ?? []), ...links.map((link) => ({ ...link, id: `rec-${requestId()}`, importId, status: 'CONFIRMADA' as const, reason, createdAt: new Date().toISOString(), createdBy: mock.settings.user }))];
+    return ok(structuredClone(bankImport));
+  },
+
+  async undoReconciliation(importId: string, reconciliationId: string, reason: string): Promise<ApiResult<BankImport>> {
+    if (serverAvailable()) return callServer<BankImport>('apiUndoReconciliation', { importId, reconciliationId, reason, requestId: requestId() });
+    const bankImport = mock.bankImports.find((item) => item.id === importId)!;
+    bankImport.reconciliations = (bankImport.reconciliations ?? []).map((item) => item.id === reconciliationId ? { ...item, status: 'DESHECHA', reason } : item);
+    return ok(structuredClone(bankImport));
+  },
+
+  async saveReconciliationException(importId: string, targetType: 'MOVEMENT' | 'INVOICE', targetId: string, reason: string): Promise<ApiResult<BankImport>> {
+    if (serverAvailable()) return callServer<BankImport>('apiSaveReconciliationException', { importId, targetType, targetId, reason, requestId: requestId() });
+    const bankImport = mock.bankImports.find((item) => item.id === importId)!;
+    if (targetType === 'MOVEMENT') bankImport.movements = bankImport.movements.map((item) => item.id === targetId ? { ...item, status: 'EXCLUIDA CON MOTIVO', evidence: reason } : item);
+    else mock.invoices = mock.invoices.map((item) => item.id === targetId ? { ...item, reconciliationStatus: 'EXCLUIDA CON MOTIVO' } : item);
+    return ok(structuredClone(bankImport));
+  },
+
+  async getMonthlyClose(period: string): Promise<ApiResult<MonthlyClose>> {
+    if (serverAvailable()) return callServer<MonthlyClose>('apiGetMonthlyClose', { period });
+    const invoices = mock.invoices.filter((item) => item.status === 'PROCESADA' && item.date.startsWith(period));
+    return ok({ period, coverage: mock.bankImports[0]?.coverage ?? 'Sin extracto confirmado', invoices: invoices.length, reviews: mock.reviewDocuments.length, reconciled: invoices.filter((item) => item.reconciliationStatus === 'CONCILIADA').length, partial: invoices.filter((item) => item.reconciliationStatus === 'PARCIALMENTE CONCILIADA').length, excluded: 0, movementsWithoutInvoice: 1, invoicesWithoutMovement: invoices.filter((item) => !item.reconciliationStatus || item.reconciliationStatus === 'SIN CONCILIAR').length, taxableBase: invoices.reduce((sum, item) => sum + Number(item.taxableBase || 0), 0), taxes: invoices.flatMap((item) => item.taxLines || []).filter((line) => line.kind !== 'RETENCION').reduce((sum, line) => sum + line.amount, 0), withholdings: invoices.flatMap((item) => item.taxLines || []).filter((line) => line.kind === 'RETENCION').reduce((sum, line) => sum + Math.abs(line.amount), 0), total: invoices.reduce((sum, item) => sum + item.total, 0), warnings: ['Datos sintéticos de desarrollo'], byCategory: [] });
+  },
+
+  async createAccountantExport(period: string, coverage: string): Promise<ApiResult<AccountantExport>> {
+    if (serverAvailable()) return callServer<AccountantExport>('apiCreateAccountantExport', { period, coverage, confirmation: 'GENERAR_EXPORTACION_GESTORIA', requestId: requestId() });
+    await delay(700);
+    return ok({ id: `exp-${requestId()}`, period, status: 'COMPLETADA', folderUrl: '#', files: [{ name: `ReparaPRO-Gestoria-${period}.zip`, url: '#', size: 1024 }], createdAt: new Date().toISOString(), createdBy: mock.settings.user });
+  },
+
+  async _legacySaveDocumentMock(document: InvoiceDocument, reason: string): Promise<ApiResult<InvoiceDocument>> {
     await delay();
     const errors = validateInvoice(document, mock.suppliers);
     const keepInReview = document.proposedStatus === 'REVISIÓN MANUAL';

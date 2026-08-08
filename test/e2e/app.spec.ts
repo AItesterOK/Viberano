@@ -167,3 +167,47 @@ test('cancela un lote sin presentar una acción de escritura', async ({ page }) 
   await expect(page.getByText('CANCELADO').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Iniciar análisis' })).toBeEnabled();
 });
+
+test('conserva borradores al navegar y recargar y permite guardarlos juntos', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Revisión/ }).first().click();
+  await page.getByRole('button', { name: /factura-demo-revision\.pdf/ }).click();
+  await page.getByLabel('Número de factura').fill('DRAFT-2026-01');
+  await expect(page.getByRole('button', { name: 'Guardar todas (1)' })).toBeVisible();
+  await page.getByRole('button', { name: /factura-demo-lista\.pdf/ }).click();
+  await page.reload();
+  await page.getByRole('button', { name: /Revisión/ }).first().click();
+  await page.getByRole('button', { name: /factura-demo-revision\.pdf/ }).click();
+  await expect(page.getByLabel('Número de factura')).toHaveValue('DRAFT-2026-01');
+  await page.getByRole('button', { name: 'Guardar todas (1)' }).click();
+  await expect(page.getByText(/1 guardadas/)).toBeVisible();
+});
+
+test('muestra fiscalidad, categorías y cierre mensual sin ocultar la cobertura', async ({ page }) => {
+  await page.goto('/');
+  if ((page.viewportSize()?.width ?? 1200) < 860) {
+    await page.getByRole('button', { name: /Más/ }).click();
+    await page.getByRole('button', { name: 'Cierre mensual' }).last().click();
+  } else await page.getByRole('button', { name: 'Cierre mensual' }).first().click();
+  await page.getByLabel('Periodo').fill('2026-07');
+  await page.getByRole('button', { name: 'Calcular cierre' }).click();
+  await expect(page.getByText('Facturas procesadas')).toBeVisible();
+  await expect(page.getByText(/Cobertura:/)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Categorías de gasto' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Preparar entrega a gestoría' })).toBeVisible();
+});
+
+test('confirma y deshace una asignación desde la matriz avanzada', async ({ page }) => {
+  await page.goto('/');
+  if ((page.viewportSize()?.width ?? 1200) < 860) {
+    await page.getByRole('button', { name: /Más/ }).click();
+    await page.getByRole('button', { name: 'Conciliación' }).last().click();
+  } else await page.getByRole('button', { name: 'Conciliación' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Asignar pagos y facturas' })).toBeVisible();
+  await page.getByLabel('Movimiento').selectOption({ index: 1 });
+  await page.getByLabel('Factura').selectOption({ index: 1 });
+  await expect(page.getByText('DIFERENCIA', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Confirmar relación' }).click();
+  await expect(page.getByText('Relación confirmada y saldos recalculados.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Deshacer' })).toBeVisible();
+});

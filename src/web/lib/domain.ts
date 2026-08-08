@@ -46,8 +46,19 @@ export function validateInvoice(input: InvoiceDocument, activeSuppliers: Supplie
   if (input.nonRegularSupplier) {
     if (supplier && supplier.invoiceCount >= 3) errors.push('El proveedor ya es habitual: tiene al menos 3 facturas históricas');
   } else if (!supplier) errors.push('Proveedor desconocido o inactivo');
+  if (input.operationDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.operationDate)) errors.push('Fecha de operación inválida');
+  if (input.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)) errors.push('Fecha de vencimiento inválida');
+  if (input.taxLines?.length) {
+    if (input.taxableBase === null || input.taxableBase === undefined) errors.push('Falta la base imponible del desglose fiscal');
+    const base = toCents(input.taxableBase ?? 0);
+    const taxes = input.taxLines.reduce((sum, line) => sum + (line.kind === 'RETENCION' ? -Math.abs(toCents(line.amount)) : toCents(line.amount)), 0);
+    if (Math.abs(base + taxes - toCents(input.total ?? 0)) > 1) errors.push('El desglose fiscal no cuadra con el total');
+  }
   return errors;
 }
+
+export function toCents(value: number): number { return Math.round(Number(value || 0) * 100); }
+export function fromCents(value: number): number { return Math.round(value) / 100; }
 
 export function formatInvoiceFileName(input: Pick<InvoiceDocument, 'invoiceDate' | 'supplier' | 'total' | 'currency' | 'invoiceNumber'>): string {
   const safe = (value: string) => value.replace(/[<>:"/\\|?*]/g, '-').replace(/\s+/g, ' ').trim();

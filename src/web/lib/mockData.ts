@@ -1,8 +1,15 @@
-import type { AppSnapshot, AuditEvent, BankImport, Batch, InvoiceDocument, InvoiceRecord, Supplier } from '../types';
+import type { AppSnapshot, AuditEvent, BankImport, Batch, ExpenseCategory, InvoiceDocument, InvoiceRecord, Supplier } from '../types';
 import { buildMonthlyMetrics } from './domain';
 
 // Datos sintéticos para desarrollo local. No proceden de correos, facturas ni extractos reales.
 const user = 'compras@reparapro.com';
+
+export const mockCategories: ExpenseCategory[] = [
+  { id: 'cat-components', name: 'Componentes y repuestos', active: true, supplierIds: ['sup-europa', 'sup-taller'], updatedAt: '2026-07-31T08:00:00Z', updatedBy: user },
+  { id: 'cat-logistics', name: 'Logística y transporte', active: true, supplierIds: ['sup-logistica'], updatedAt: '2026-07-31T08:00:00Z', updatedBy: user },
+  { id: 'cat-software', name: 'Software y servicios digitales', active: true, supplierIds: ['sup-servicios'], updatedAt: '2026-07-31T08:00:00Z', updatedBy: user },
+  { id: 'cat-other', name: 'Otros', active: true, supplierIds: [], updatedAt: '2026-07-31T08:00:00Z', updatedBy: user },
+];
 
 export const mockSuppliers: Supplier[] = [
   { id: 'sup-norte', name: 'Proveedor Demo Norte SL', domain: 'demo-norte.invalid', taxId: 'B00000001', aliases: ['Demo Norte'], active: true, evidence: 'Evidencia sintética de demostración', updatedAt: '2026-07-21T09:10:00Z', updatedBy: user, invoiceCount: 3 },
@@ -29,7 +36,7 @@ const reviewDocument: InvoiceDocument = {
     { field: 'supplier', value: 'Proveedor Nuevo Demo SL', source: 'PDF', excerpt: 'Proveedor Nuevo Demo, S.L. · Factura DEMO-0771' },
     { field: 'invoiceNumber', value: 'DEMO-0771', source: 'PDF', excerpt: 'Número de factura: DEMO-0771' },
     { field: 'total', value: '88.42 EUR', source: 'PDF', excerpt: 'Total 88,42 EUR' },
-  ], hash: 'demo-sha256-review-1', gmailUrl: '#', selected: false,
+  ], hash: 'demo-sha256-review-1', gmailUrl: '#', selected: false, categoryId: 'cat-other', taxableBase: 73.07, taxLines: [{ id: 'tax-demo-1', kind: 'IVA', rate: 21, base: 73.07, amount: 15.35 }], updatedAt: '2026-07-31T08:00:00Z', validationErrors: ['Proveedor desconocido o inactivo'],
 };
 
 const readyDocument: InvoiceDocument = {
@@ -74,11 +81,13 @@ export function createMockSnapshot(): AppSnapshot {
     reviewDocuments: [reviewDocument],
     invoices: mockInvoices,
     suppliers: mockSuppliers,
+    categories: mockCategories,
     metrics,
     bankImports: [mockBankImport],
     audit: mockAudit,
     reviewCount: 1,
     processedCount: 7,
     duplicateCount: 2,
+    exports: [],
   };
 }

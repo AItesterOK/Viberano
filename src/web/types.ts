@@ -25,6 +25,10 @@ export type BatchStatus =
   | 'CANCELADO';
 
 export type ReconciliationStatus =
+  | 'SIN CONCILIAR'
+  | 'PARCIALMENTE CONCILIADA'
+  | 'CONCILIADA'
+  | 'EXCLUIDA CON MOTIVO'
   | 'COINCIDENCIA CONFIRMADA'
   | 'CANDIDATA PENDIENTE'
   | 'NO ENCONTRADA EN ESTE EXTRACTO'
@@ -52,6 +56,12 @@ export interface InvoiceDocument {
   subject: string;
   emailDate: string;
   invoiceDate: string;
+  operationDate?: string;
+  dueDate?: string;
+  categoryId?: string;
+  taxableBase?: number | null;
+  taxLines?: TaxLine[];
+  internalNote?: string;
   supplier: string;
   supplierId?: string;
   taxId: string;
@@ -68,6 +78,51 @@ export interface InvoiceDocument {
   gmailUrl?: string;
   selected: boolean;
   nonRegularSupplier?: boolean;
+  decisionReason?: string;
+  validationErrors?: string[];
+  updatedAt?: string;
+}
+
+export type TaxKind = 'IVA' | 'IGIC' | 'RETENCION' | 'OTRO';
+
+export interface TaxLine {
+  id: string;
+  kind: TaxKind;
+  rate: number;
+  base: number;
+  amount: number;
+}
+
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  active: boolean;
+  supplierIds: string[];
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface ReviewDraft {
+  document: InvoiceDocument;
+  reason: string;
+  baseUpdatedAt: string;
+  decisionId: string;
+  dirtyAt: string;
+}
+
+export interface ReviewSaveItemResult {
+  documentId: string;
+  ok: boolean;
+  ready: boolean;
+  document?: InvoiceDocument;
+  error?: { code: string; message: string; retryable?: boolean };
+}
+
+export interface ReviewSaveResult {
+  items: ReviewSaveItemResult[];
+  saved: number;
+  failed: number;
+  durationMs: number;
 }
 
 export interface DocumentPreview {
@@ -127,6 +182,14 @@ export interface InvoiceRecord {
   batchId: string;
   hash: string;
   nonRegularSupplier?: boolean;
+  operationDate?: string;
+  dueDate?: string;
+  categoryId?: string;
+  taxableBase?: number | null;
+  taxLines?: TaxLine[];
+  internalNote?: string;
+  reconciliationStatus?: ReconciliationStatus;
+  assignedAmount?: number;
 }
 
 export interface MonthlyMetric {
@@ -149,6 +212,23 @@ export interface BankMovement {
   status: ReconciliationStatus;
   candidateInvoiceId?: string;
   evidence?: string;
+  assignedAmount?: number;
+  difference?: number;
+}
+
+export interface ReconciliationLink {
+  id: string;
+  importId: string;
+  movementId: string;
+  invoiceId: string;
+  allocatedAmount: number;
+  status: 'PROPUESTA' | 'CONFIRMADA' | 'DESHECHA' | 'RECHAZADA';
+  evidence: string;
+  reason: string;
+  createdAt: string;
+  createdBy: string;
+  decidedAt?: string;
+  decidedBy?: string;
 }
 
 export interface BankImport {
@@ -168,6 +248,37 @@ export interface BankImport {
   createdAt: string;
   createdBy: string;
   movements: BankMovement[];
+  reconciliations?: ReconciliationLink[];
+}
+
+export interface MonthlyClose {
+  period: string;
+  coverage: string;
+  invoices: number;
+  reviews: number;
+  reconciled: number;
+  partial: number;
+  excluded: number;
+  movementsWithoutInvoice: number;
+  invoicesWithoutMovement: number;
+  taxableBase: number;
+  taxes: number;
+  withholdings: number;
+  total: number;
+  warnings: string[];
+  byCategory: { categoryId: string; category: string; count: number; total: number }[];
+}
+
+export interface AccountantExport {
+  id: string;
+  period: string;
+  status: 'GENERANDO' | 'COMPLETADA' | 'ERROR';
+  folderUrl?: string;
+  files: { name: string; url: string; size: number }[];
+  manifestHash?: string;
+  createdAt: string;
+  createdBy: string;
+  error?: string;
 }
 
 export interface AuditEvent {
@@ -205,12 +316,14 @@ export interface AppSnapshot {
   reviewDocuments: InvoiceDocument[];
   invoices: InvoiceRecord[];
   suppliers: Supplier[];
+  categories: ExpenseCategory[];
   metrics: MonthlyMetric[];
   bankImports: BankImport[];
   audit: AuditEvent[];
   reviewCount: number;
   processedCount: number;
   duplicateCount: number;
+  exports?: AccountantExport[];
 }
 
 export interface ApiResult<T> {

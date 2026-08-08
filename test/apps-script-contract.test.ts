@@ -79,8 +79,8 @@ describe('contrato de seguridad de Apps Script', () => {
 
   it('mantiene las excepciones justificadas fuera de la aprobación', () => {
     const invoice = source('InvoiceService.js');
-    expect(invoice).toContain("const keepInReview = input.proposedStatus === 'REVISIÓN MANUAL'");
-    expect(invoice).toContain("errors.length || keepInReview ? 'EN REVISIÓN' : 'LISTO PARA APROBAR'");
+    expect(invoice).toContain("const classification = String(input.proposedStatus || 'REVISIÓN MANUAL')");
+    expect(invoice).toContain("errors.length || classification === 'REVISIÓN MANUAL' ? 'EN REVISIÓN' : 'LISTO PARA APROBAR'");
     expect(invoice).toContain("SELECCIONADO: phase === 'LISTO PARA APROBAR'");
   });
 
@@ -93,7 +93,7 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(gmail).toContain("'Nota de crédito acreditada; se archivará en gastos con importe negativo.'");
     expect(core).toContain('function isCreditNoteDocument_');
     expect(core).toContain('creditNote ? amount < 0 : amount > 0');
-    expect(invoice).toContain('isValidInvoiceAmount_(input.total, input, payload.reason)');
+    expect(invoice).toContain('isValidInvoiceAmount_(input.total, input, reason)');
     expect(invoice).toContain('isValidInvoiceAmount_(row.IMPORTE_TOTAL, row)');
   });
 
@@ -137,8 +137,8 @@ describe('contrato de seguridad de Apps Script', () => {
 
   it('vacía los campos contables de los documentos que no son facturas de gasto', () => {
     const invoice = source('InvoiceService.js');
-    expect(invoice).toContain("const keepAccountingFields = proposed === 'PROCESADA' || proposed === 'REVISIÓN MANUAL'");
-    expect(invoice).toContain("FECHA_FACTURA: keepAccountingFields ? parseDate_(input.invoiceDate) : ''");
+    expect(invoice).toContain("const keepAccounting = classification === 'PROCESADA' || classification === 'REVISIÓN MANUAL'");
+    expect(invoice).toContain("FECHA_FACTURA: keepAccounting ? parseDate_(input.invoiceDate) : ''");
     expect(invoice).toContain("IMPORTE_TOTAL: keepAccountingFields && Number.isFinite(Number(row.IMPORTE_TOTAL)) ? Number(row.IMPORTE_TOTAL) : ''");
     expect(invoice).toContain("PROVEEDOR: keepAccountingFields ? row.PROVEEDOR || '' : ''");
   });
@@ -166,7 +166,7 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(gmail).not.toContain("String(batchRow.FECHA_DESDE) + 'T00:00:00+02:00'");
     expect(data).toContain('invoiceDate: parseDate_(row.FECHA_FACTURA)');
     expect(data).toContain('date: parseDate_(row.FECHA_FACTURA)');
-    expect(invoice).toContain("FECHA_FACTURA: keepAccountingFields ? parseDate_(input.invoiceDate) : ''");
+    expect(invoice).toContain("FECHA_FACTURA: keepAccounting ? parseDate_(input.invoiceDate) : ''");
     expect(invoice).toContain('const invoiceDate = parseDate_(row.FECHA_FACTURA)');
     expect(invoice).toContain("FECHA_FACTURA: keepAccountingFields ? parseDate_(row.FECHA_FACTURA) : ''");
     expect(core).toContain("const parts = parseDate_(dateText).split('-').map(Number)");
@@ -252,12 +252,53 @@ describe('contrato de seguridad de Apps Script', () => {
     const config = source('Config.js');
     const invoice = source('InvoiceService.js');
     const data = source('Data.js');
-    expect(config).toContain("VERSION: '1.6.0'");
+    expect(config).toContain("VERSION: '1.8.0'");
     expect(config).toContain("'PROVEEDOR_NO_HABITUAL'");
     expect(invoice).toContain('processedSupplierInvoiceCount_');
-    expect(invoice).toContain('providerHistory < 3');
+    expect(invoice).toContain('providerHistory >= 3');
     expect(invoice).toContain("appError_('SUPPLIER_ALREADY_REGULAR'");
     expect(invoice).toContain('PROVEEDOR_NO_HABITUAL: toBoolean_(row.PROVEEDOR_NO_HABITUAL)');
     expect(data).toContain('nonRegularSupplier: toBoolean_(row.PROVEEDOR_NO_HABITUAL)');
+  });
+
+  it('guarda hasta 20 revisiones bajo un único bloqueo y conserva conflictos por documento', () => {
+    const api = source('Api.js');
+    const invoice = source('InvoiceService.js');
+    expect(api).toContain('function apiSaveDocumentReviews');
+    expect(api).toContain('saveDocumentReviews_(payload, user, requestId); }, { lock: true })');
+    expect(invoice).toContain("slice(0, 20)");
+    expect(invoice).toContain("appError_('REVIEW_CONFLICT'");
+    expect(invoice).toContain('validationErrors: errors');
+  });
+
+  it('soporta conciliación múltiple, parcial, exclusión justificada y deshacer', () => {
+    const bank = source('BankService.js');
+    expect(bank).toContain('function saveReconciliationLinks_');
+    expect(bank).toContain("'PARCIALMENTE CONCILIADA'");
+    expect(bank).toContain("'ALLOCATION_EXCEEDS_BALANCE'");
+    expect(bank).toContain('function saveReconciliationException_');
+    expect(bank).toContain("ESTADO_CONCILIACION: 'EXCLUIDA CON MOTIVO'");
+    expect(bank).toContain('function undoReconciliation_');
+  });
+
+  it('crea categorías, cierre y exportación idempotente para gestoría', () => {
+    const config = source('Config.js');
+    const close = source('CloseService.js');
+    expect(config).toContain('DEFAULT_CATEGORIES');
+    expect(config).toContain("CATEGORIES: 'CATEGORIAS'");
+    expect(close).toContain('function buildMonthlyClose_');
+    expect(close).toContain('function createAccountantExport_');
+    expect(close).toContain("'GENERAR_EXPORTACION_GESTORIA'");
+    expect(close).toContain('String(row.REQUEST_ID) === String(requestId)');
+    expect(close).toContain('splitBlobs_(blobs, 35 * 1024 * 1024)');
+  });
+
+  it('pagina facturas, banco e historial sin cargar el histórico completo al arrancar', () => {
+    const api = source('Api.js');
+    expect(api).toContain('function apiListInvoices');
+    expect(api).toContain('function apiListBankImports');
+    expect(api).toContain('function apiListAudit');
+    expect(api).toContain('nextOffset: offset + limit < rows.length ? offset + limit : null');
+    expect(api).toContain('allInvoices.slice(-500).reverse()');
   });
 });

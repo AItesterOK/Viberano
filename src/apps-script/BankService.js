@@ -171,15 +171,95 @@ function decideReconciliation_(payload, user, requestId) {
   return bankImportById_(payload.importId);
 }
 
-function movementFromRow_(row) {
-  return { id: String(row.MOVIMIENTO_ID || ''), importId: String(row.IMPORT_ID || ''), operationDate: String(row.FECHA_OPERACION || ''), valueDate: String(row.FECHA_VALOR || ''), concept: String(row.CONCEPTO || ''), amount: Number(row.IMPORTE || 0), currency: String(row.MONEDA || ''), reference: String(row.REFERENCIA || ''), type: String(row.TIPO || 'REVISIÓN'), status: String(row.ESTADO_CONCILIACION || 'REVISIÓN MANUAL'), candidateInvoiceId: String(row.FACTURA_CANDIDATA_ID || '') || undefined, evidence: String(row.EVIDENCIA || '') || undefined };
+function saveReconciliationLinks_(payload, user, requestId) {
+  const repeated = eventByRequest_(requestId, 'CONCILIACION_MULTIPLE_CONFIRMADA');
+  if (repeated) return bankImportById_(String(repeated.DOCUMENTO || payload.importId || ''));
+  const links = (payload.links || []).slice(0, 50);
+  if (!links.length) throw appError_('EMPTY_RECONCILIATION', 'Selecciona al menos una factura o movimiento.');
+  const movements = safeRows_(APP.SHEETS.MOVEMENTS);
+  const invoices = safeRows_(APP.SHEETS.INVOICES);
+  const existingLinks = safeRows_(APP.SHEETS.RECONCILIATIONS);
+  const results = [];
+  links.forEach(function (input, index) {
+    const movement = movements.find(function (row) { return String(row.MOVIMIENTO_ID) === String(input.movementId); });
+    const invoice = invoices.find(function (row) { return String(row.ID_UNICO || '') === String(input.invoiceId); });
+    if (!movement || !invoice) throw appError_('RECONCILIATION_TARGET_MISSING', 'No se encuentra la factura o el movimiento seleccionado.');
+    if (String(movement.ESTADO_IMPORTACION) !== 'CONFIRMADA') throw appError_('BANK_IMPORT_NOT_CONFIRMED', 'Archiva primero el extracto antes de conciliar.');
+    if (String(movement.MONEDA) !== String(invoice.MONEDA)) throw appError_('CURRENCY_MISMATCH', 'Factura y movimiento deben tener la misma moneda.');
+    const allocated = Math.round(Math.abs(Number(input.allocatedAmount || 0)) * 100);
+    if (!allocated) throw appError_('INVALID_ALLOCATION', 'El importe asignado debe ser mayor que cero.');
+    const movementTotal = Math.round(Math.abs(Number(movement.IMPORTE || 0)) * 100);
+    const invoiceTotal = Math.round(Math.abs(Number(invoice.IMPORTE_TOTAL || 0)) * 100);
+    const active = existingLinks.filter(function (row) { return String(row.ESTADO) === 'CONFIRMADA'; });
+    const movementAssigned = active.filter(function (row) { return String(row.MOVIMIENTO_ID) === String(input.movementId); }).reduce(function (sum, row) { return sum + Math.round(Math.abs(Number(row.IMPORTE_ASIGNADO || 0)) * 100); }, 0);
+    const invoiceAssigned = active.filter(function (row) { return String(row.FACTURA_ID) === String(input.invoiceId); }).reduce(function (sum, row) { return sum + Math.round(Math.abs(Number(row.IMPORTE_ASIGNADO || 0)) * 100); }, 0);
+    const exceeds = allocated > movementTotal - movementAssigned + 1 || allocated > invoiceTotal - invoiceAssigned + 1;
+    if (exceeds && !(payload.allowDifference && String(payload.reason || '').trim())) throw appError_('ALLOCATION_EXCEEDS_BALANCE', 'La asignación supera el saldo pendiente. Confirma la diferencia e indica el motivo.');
+    const id = 'REC-' + uuid_();
+    appendObject_(APP.SHEETS.RECONCILIATIONS, { CONCILIACION_ID: id, IMPORT_ID: String(movement.IMPORT_ID || ''), MOVIMIENTO_ID: input.movementId, FACTURA_ID: input.invoiceId, IMPORTE_ASIGNADO: allocated / 100, ESTADO: 'CONFIRMADA', EVIDENCIA: String(input.evidence || movement.EVIDENCIA || ''), DECISION: 'CONCILIADA', MOTIVO: String(payload.reason || ''), CREADO_EN: nowIso_(), CREADO_POR: user, DECIDIDO_EN: nowIso_(), DECIDIDO_POR: user, REQUEST_ID: requestId + '-' + index });
+    existingLinks.push({ MOVIMIENTO_ID: input.movementId, FACTURA_ID: input.invoiceId, IMPORTE_ASIGNADO: allocated / 100, ESTADO: 'CONFIRMADA' });
+    results.push(id);
+  });
+  recalculateReconciliationState_(links.map(function (link) { return link.movementId; }), links.map(function (link) { return link.invoiceId; }), user, requestId);
+  logEvent_('INFO', 'CONCILIACION_MULTIPLE_CONFIRMADA', String(payload.importId || ''), results.length + ' vínculos confirmados', { links: results }, '', requestId, user);
+  return bankImportById_(String(payload.importId || ''));
+}
+
+function undoReconciliation_(payload, user, requestId) {
+  const row = safeRows_(APP.SHEETS.RECONCILIATIONS).find(function (candidate) { return String(candidate.CONCILIACION_ID) === String(payload.reconciliationId); });
+  if (!row) throw appError_('RECONCILIATION_NOT_FOUND', 'No se encuentra la conciliación.');
+  if (String(row.ESTADO) === 'DESHECHA') return bankImportById_(String(row.IMPORT_ID || ''));
+  const reason = String(payload.reason || '').trim();
+  if (!reason) throw appError_('REASON_REQUIRED', 'Indica el motivo para deshacer la conciliación.');
+  updateObjectRow_(APP.SHEETS.RECONCILIATIONS, row.__row, { ESTADO: 'DESHECHA', DECISION: 'DESHECHA', MOTIVO: reason, DESHECHO_EN: nowIso_(), DESHECHO_POR: user, REQUEST_ID: requestId });
+  recalculateReconciliationState_([String(row.MOVIMIENTO_ID)], [String(row.FACTURA_ID)], user, requestId);
+  logEvent_('WARN', 'CONCILIACION_DESHECHA', String(row.CONCILIACION_ID), reason, {}, '', requestId, user);
+  return bankImportById_(String(row.IMPORT_ID || ''));
+}
+
+function saveReconciliationException_(payload, user, requestId) {
+  const reason = String(payload.reason || '').trim();
+  if (!reason) throw appError_('REASON_REQUIRED', 'La exclusión necesita un motivo acreditado.');
+  const targetType = String(payload.targetType || 'MOVEMENT');
+  const targetId = String(payload.targetId || '');
+  if (targetType === 'MOVEMENT') {
+    const movement = safeRows_(APP.SHEETS.MOVEMENTS).find(function (row) { return String(row.MOVIMIENTO_ID) === targetId && String(row.IMPORT_ID) === String(payload.importId || ''); });
+    if (!movement) throw appError_('MOVEMENT_NOT_FOUND', 'No se encuentra el movimiento.');
+    if (String(movement.ESTADO_IMPORTACION) !== 'CONFIRMADA') throw appError_('BANK_IMPORT_NOT_CONFIRMED', 'Archiva primero el extracto.');
+    updateObjectRow_(APP.SHEETS.MOVEMENTS, movement.__row, { ESTADO_CONCILIACION: 'EXCLUIDA CON MOTIVO', EVIDENCIA: reason, CREADO_POR: user, REQUEST_ID: requestId });
+    logEvent_('WARN', 'MOVIMIENTO_EXCLUIDO', targetId, reason, {}, '', requestId, user);
+    return bankImportById_(String(movement.IMPORT_ID || ''));
+  }
+  if (targetType === 'INVOICE') {
+    const invoice = safeRows_(APP.SHEETS.INVOICES).find(function (row) { return String(row.ID_UNICO || '') === targetId; });
+    if (!invoice) throw appError_('INVOICE_NOT_FOUND', 'No se encuentra la factura.');
+    updateObjectRow_(APP.SHEETS.INVOICES, invoice.__row, { ESTADO_CONCILIACION: 'EXCLUIDA CON MOTIVO' });
+    logEvent_('WARN', 'FACTURA_FUERA_DE_EXTRACTO', targetId, reason, { importId: String(payload.importId || '') }, '', requestId, user);
+    return bankImportById_(String(payload.importId || ''));
+  }
+  throw appError_('INVALID_EXCEPTION_TARGET', 'El tipo de excepción no es válido.');
+}
+
+function recalculateReconciliationState_(movementIds, invoiceIds, user, requestId) {
+  const links = safeRows_(APP.SHEETS.RECONCILIATIONS).filter(function (row) { return String(row.ESTADO) === 'CONFIRMADA'; });
+  const movements = safeRows_(APP.SHEETS.MOVEMENTS);
+  movementIds.filter(function (id, index, list) { return list.indexOf(id) === index; }).forEach(function (id) { const row = movements.find(function (candidate) { return String(candidate.MOVIMIENTO_ID) === String(id); }); if (!row) return; const assigned = links.filter(function (link) { return String(link.MOVIMIENTO_ID) === String(id); }).reduce(function (sum, link) { return sum + Math.abs(Number(link.IMPORTE_ASIGNADO || 0)); }, 0); const total = Math.abs(Number(row.IMPORTE || 0)); const status = assigned <= 0.009 ? 'SIN CONCILIAR' : Math.abs(total - assigned) <= 0.01 ? 'CONCILIADA' : 'PARCIALMENTE CONCILIADA'; updateObjectRow_(APP.SHEETS.MOVEMENTS, row.__row, { ESTADO_CONCILIACION: status, CREADO_POR: user, REQUEST_ID: requestId }); });
+  const invoices = safeRows_(APP.SHEETS.INVOICES);
+  invoiceIds.filter(function (id, index, list) { return list.indexOf(id) === index; }).forEach(function (id) { const row = invoices.find(function (candidate) { return String(candidate.ID_UNICO || '') === String(id); }); if (!row) return; const assigned = links.filter(function (link) { return String(link.FACTURA_ID) === String(id); }).reduce(function (sum, link) { return sum + Math.abs(Number(link.IMPORTE_ASIGNADO || 0)); }, 0); const total = Math.abs(Number(row.IMPORTE_TOTAL || 0)); const status = assigned <= 0.009 ? 'SIN CONCILIAR' : Math.abs(total - assigned) <= 0.01 ? 'CONCILIADA' : 'PARCIALMENTE CONCILIADA'; updateObjectRow_(APP.SHEETS.INVOICES, row.__row, { ESTADO_CONCILIACION: status, IMPORTE_ASIGNADO: Math.round(assigned * 100) / 100 }); });
+}
+
+function movementFromRow_(row, allLinks) {
+  const links = (allLinks || safeRows_(APP.SHEETS.RECONCILIATIONS)).filter(function (link) { return String(link.MOVIMIENTO_ID) === String(row.MOVIMIENTO_ID) && String(link.ESTADO) === 'CONFIRMADA'; });
+  const assigned = links.reduce(function (sum, link) { return sum + Math.abs(Number(link.IMPORTE_ASIGNADO || 0)); }, 0);
+  return { id: String(row.MOVIMIENTO_ID || ''), importId: String(row.IMPORT_ID || ''), operationDate: String(row.FECHA_OPERACION || ''), valueDate: String(row.FECHA_VALOR || ''), concept: String(row.CONCEPTO || ''), amount: Number(row.IMPORTE || 0), currency: String(row.MONEDA || ''), reference: String(row.REFERENCIA || ''), type: String(row.TIPO || 'REVISIÓN'), status: String(row.ESTADO_CONCILIACION || 'SIN CONCILIAR'), candidateInvoiceId: String(row.FACTURA_CANDIDATA_ID || '') || undefined, evidence: String(row.EVIDENCIA || '') || undefined, assignedAmount: Math.round(assigned * 100) / 100, difference: Math.round((Math.abs(Number(row.IMPORTE || 0)) - assigned) * 100) / 100 };
 }
 
 function bankImportById_(importId) {
   const rows = safeRows_(APP.SHEETS.MOVEMENTS).filter(function (row) { return String(row.IMPORT_ID) === String(importId); });
   if (!rows.length) return null;
   const first = rows[0];
-  return { id: String(importId), fileName: String(first.ARCHIVO_NOMBRE || ''), fileHash: String(first.ARCHIVO_HASH || ''), source: String(first.FUENTE || ''), periodFrom: String(first.PERIODO_DESDE || ''), periodTo: String(first.PERIODO_HASTA || ''), detectedPeriodFrom: String(first.PERIODO_DETECTADO_DESDE || '') || undefined, detectedPeriodTo: String(first.PERIODO_DETECTADO_HASTA || '') || undefined, warnings: safeJsonParse_(first.ADVERTENCIAS_JSON, []), coverage: String(first.COBERTURA || ''), status: String(first.ESTADO_IMPORTACION || 'PREVISUALIZACIÓN'), movementCount: rows.length, driveUrl: String(first.URL_DRIVE || '') || undefined, createdAt: String(first.CREADO_EN || ''), createdBy: String(first.CREADO_POR || ''), movements: rows.map(movementFromRow_) };
+  const links = safeRows_(APP.SHEETS.RECONCILIATIONS).filter(function (row) { return String(row.IMPORT_ID) === String(importId); }).map(function (row) { return { id: String(row.CONCILIACION_ID || ''), importId: String(row.IMPORT_ID || ''), movementId: String(row.MOVIMIENTO_ID || ''), invoiceId: String(row.FACTURA_ID || ''), allocatedAmount: Number(row.IMPORTE_ASIGNADO || 0), status: String(row.ESTADO || 'PROPUESTA'), evidence: String(row.EVIDENCIA || ''), reason: String(row.MOTIVO || ''), createdAt: String(row.CREADO_EN || ''), createdBy: String(row.CREADO_POR || ''), decidedAt: String(row.DECIDIDO_EN || '') || undefined, decidedBy: String(row.DECIDIDO_POR || '') || undefined }; });
+  return { id: String(importId), fileName: String(first.ARCHIVO_NOMBRE || ''), fileHash: String(first.ARCHIVO_HASH || ''), source: String(first.FUENTE || ''), periodFrom: String(first.PERIODO_DESDE || ''), periodTo: String(first.PERIODO_HASTA || ''), detectedPeriodFrom: String(first.PERIODO_DETECTADO_DESDE || '') || undefined, detectedPeriodTo: String(first.PERIODO_DETECTADO_HASTA || '') || undefined, warnings: safeJsonParse_(first.ADVERTENCIAS_JSON, []), coverage: String(first.COBERTURA || ''), status: String(first.ESTADO_IMPORTACION || 'PREVISUALIZACIÓN'), movementCount: rows.length, driveUrl: String(first.URL_DRIVE || '') || undefined, createdAt: String(first.CREADO_EN || ''), createdBy: String(first.CREADO_POR || ''), movements: rows.map(function (row) { return movementFromRow_(row, links); }), reconciliations: links };
 }
 
 function allBankImports_() {

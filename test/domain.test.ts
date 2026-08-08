@@ -42,6 +42,13 @@ describe('reglas documentales', () => {
     const b = { ...a, supplier: 'Proveedor-Demo', currency: 'EUR' };
     expect(invoiceIdentityKey(a)).toBe(invoiceIdentityKey(b));
   });
+
+  it('cuadra fiscalidad en céntimos y admite retenciones', () => {
+    const base = { id: 'tax', batchId: 'b', messageId: 'm', originalName: 'tax.pdf', sender: '', subject: '', emailDate: '', invoiceDate: '2026-07-16', supplier: 'Componentes Demo Europa BV', supplierId: 'sup-europa', taxId: '', invoiceNumber: 'TAX-1', total: 119, currency: 'EUR', phase: 'EN REVISIÓN', proposedStatus: 'PROCESADA', reviewReason: '', evidence: [], hash: 'tax', selected: false, taxableBase: 100, taxLines: [{ id: 'iva', kind: 'IVA', rate: 21, base: 100, amount: 21 }, { id: 'irpf', kind: 'RETENCION', rate: 2, base: 100, amount: 2 }] } as import('../src/web/types').InvoiceDocument;
+    expect(validateInvoice(base, mockSuppliers)).toEqual([]);
+    expect(validateInvoice({ ...base, total: 119.02 }, mockSuppliers)).toContain('El desglose fiscal no cuadra con el total');
+    expect(validateInvoice({ ...base, taxableBase: null }, mockSuppliers)).toContain('Falta la base imponible del desglose fiscal');
+  });
 });
 
 describe('métricas y banco', () => {
