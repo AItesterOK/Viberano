@@ -23,8 +23,11 @@ function getRows_(name) {
 function appendObject_(name, object) {
   const sheet = sheet_(name);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
-  sheet.appendRow(headers.map(function (header) { return object[header] === undefined ? '' : object[header]; }));
-  return sheet.getLastRow();
+  const rowNumber = sheet.getLastRow() + 1;
+  const values = headers.map(function (header) { return object[header] === undefined ? '' : object[header]; });
+  preserveInvoiceNumberAsText_(name, sheet, headers, rowNumber, [object], [values]);
+  sheet.getRange(rowNumber, 1, 1, headers.length).setValues([values]);
+  return rowNumber;
 }
 
 function appendObjects_(name, objects) {
@@ -33,6 +36,7 @@ function appendObjects_(name, objects) {
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
   const firstRow = sheet.getLastRow() + 1;
   const values = objects.map(function (object) { return headers.map(function (header) { return object[header] === undefined ? '' : object[header]; }); });
+  preserveInvoiceNumberAsText_(name, sheet, headers, firstRow, objects, values);
   sheet.getRange(firstRow, 1, values.length, headers.length).setValues(values);
   return values.map(function (_, index) { return firstRow + index; });
 }
@@ -43,6 +47,7 @@ function updateObjectRow_(name, rowNumber, updates) {
   const range = sheet.getRange(rowNumber, 1, 1, headers.length);
   const values = range.getValues()[0];
   headers.forEach(function (header, index) { if (Object.prototype.hasOwnProperty.call(updates, header)) values[index] = updates[header]; });
+  preserveInvoiceNumberAsText_(name, sheet, headers, rowNumber, [updates], [values]);
   range.setValues([values]);
 }
 
@@ -65,7 +70,21 @@ function updateObjectRows_(name, changes) {
       const row = values[Number(change.rowNumber) - group.start];
       headers.forEach(function (header, index) { if (Object.prototype.hasOwnProperty.call(change.updates, header)) row[index] = change.updates[header]; });
     });
+    preserveInvoiceNumberAsText_(name, sheet, headers, group.start, group.changes.map(function (change) { return change.updates; }), values, group.changes.map(function (change) { return Number(change.rowNumber); }));
     range.setValues(values);
+  });
+}
+
+function preserveInvoiceNumberAsText_(name, sheet, headers, firstRow, objects, values, rowNumbers) {
+  const header = name === APP.SHEETS.DOCUMENTS ? 'NUMERO_FACTURA' : name === APP.SHEETS.INVOICES ? 'NÚMERO_FACTURA' : '';
+  const column = header ? headers.indexOf(header) : -1;
+  if (column === -1) return;
+  objects.forEach(function (object, index) {
+    if (!Object.prototype.hasOwnProperty.call(object, header)) return;
+    const rowIndex = rowNumbers ? rowNumbers[index] - firstRow : index;
+    const value = object[header];
+    values[rowIndex][column] = value === '' || value === null || value === undefined ? '' : String(value);
+    sheet.getRange(firstRow + rowIndex, column + 1).setNumberFormat('@');
   });
 }
 

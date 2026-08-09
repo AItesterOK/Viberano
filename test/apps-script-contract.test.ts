@@ -173,6 +173,14 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(core).toContain("const parts = parseDate_(dateText).split('-').map(Number)");
   });
 
+  it('conserva los números de factura con barra como texto', () => {
+    const data = source('Data.js');
+    expect(data).toContain('function preserveInvoiceNumberAsText_');
+    expect(data).toContain("name === APP.SHEETS.DOCUMENTS ? 'NUMERO_FACTURA'");
+    expect(data).toContain("name === APP.SHEETS.INVOICES ? 'NÚMERO_FACTURA'");
+    expect(data).toContain("setNumberFormat('@')");
+  });
+
   it('descodifica adjuntos Gmail como Base64 URL-safe sin convertir el alfabeto', () => {
     const core = source('Core.js');
     expect(core).toContain('if (Array.isArray(value)) return value');
@@ -262,7 +270,7 @@ describe('contrato de seguridad de Apps Script', () => {
     const config = source('Config.js');
     const invoice = source('InvoiceService.js');
     const data = source('Data.js');
-    expect(config).toContain("VERSION: '1.8.0'");
+    expect(config).toContain("VERSION: '1.8.1'");
     expect(config).toContain("'PROVEEDOR_NO_HABITUAL'");
     expect(invoice).toContain('processedSupplierInvoiceCount_');
     expect(invoice).toContain('providerHistory >= 3');
