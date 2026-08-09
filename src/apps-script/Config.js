@@ -1,6 +1,6 @@
 const APP = Object.freeze({
   NAME: 'ReparaPRO Gastos',
-  VERSION: '1.8.0',
+  VERSION: '1.8.1',
   SPREADSHEET_ID: '1ivQ30ZjxNEMOXZCZEordOZFOVJopQS6xTj8Iy4m4yvU',
   INVOICE_FOLDER_ID: '1hv9U-HJxLkLSB__IBnbLl02lCzqEOgu5',
   BANK_FOLDER_ID: '1Lo92j-ol_ZuAaq-6Uioi-eh60jBP_S5l',
