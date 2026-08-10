@@ -66,7 +66,8 @@ describe('contrato de seguridad de Apps Script', () => {
 
   it('no infiere silenciosamente la moneda bancaria', () => {
     const bank = source('BankService.js');
-    expect(bank).toContain("mapping.currency === undefined");
+    expect(bank).toContain("mapping.currencyMode");
+    expect(bank).toContain("embeddedCurrency_");
     expect(bank).toContain("appError_('INVALID_BANK_CURRENCY'");
     expect(bank).toContain('no se asumirá EUR');
   });
@@ -270,7 +271,7 @@ describe('contrato de seguridad de Apps Script', () => {
     const config = source('Config.js');
     const invoice = source('InvoiceService.js');
     const data = source('Data.js');
-    expect(config).toContain("VERSION: '1.8.1'");
+    expect(config).toContain("VERSION: '1.8.4'");
     expect(config).toContain("'PROVEEDOR_NO_HABITUAL'");
     expect(invoice).toContain('processedSupplierInvoiceCount_');
     expect(invoice).toContain('providerHistory >= 3');

@@ -216,6 +216,50 @@ export interface BankMovement {
   difference?: number;
 }
 
+export type BankCurrencyMode = 'COLUMN' | 'EMBEDDED' | 'FIXED';
+
+export interface BankMapping {
+  operationDate?: number;
+  valueDate?: number;
+  concept?: number;
+  amount?: number;
+  currency?: number;
+  reference?: number;
+  headerRow: number;
+  currencyMode: BankCurrencyMode;
+  fixedCurrency?: string;
+  rememberProfile?: boolean;
+  profileName?: string;
+}
+
+export interface BankFormat {
+  id: string;
+  name: string;
+  source: string;
+  extension: string;
+  separator: string;
+  headerSignature: string;
+  headerRow: number;
+  mapping: Omit<BankMapping, 'headerRow' | 'currencyMode' | 'fixedCurrency' | 'rememberProfile' | 'profileName'>;
+  currencyMode: BankCurrencyMode;
+  fixedCurrency: string;
+  active: boolean;
+  native: boolean;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface BankMappingRequiredDetails {
+  headers: string[];
+  headerRow: number;
+  headerSignature: string;
+  extension: string;
+  separator: string;
+  suggestedCurrencyMode: BankCurrencyMode;
+}
+
 export interface ReconciliationLink {
   id: string;
   importId: string;
@@ -244,6 +288,8 @@ export interface BankImport {
   detectedPeriodFrom?: string;
   detectedPeriodTo?: string;
   warnings?: string[];
+  bankFormatId?: string;
+  bankFormatName?: string;
   driveUrl?: string;
   createdAt: string;
   createdBy: string;
@@ -319,6 +365,7 @@ export interface AppSnapshot {
   categories: ExpenseCategory[];
   metrics: MonthlyMetric[];
   bankImports: BankImport[];
+  bankFormats: BankFormat[];
   audit: AuditEvent[];
   reviewCount: number;
   processedCount: number;

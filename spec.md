@@ -262,6 +262,9 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 - **FR-034**: El sistema DEBE iniciar el procesamiento únicamente por una acción expresa de una persona autorizada y no mediante ejecuciones programadas.
 - **FR-035**: El sistema DEBE exigir una identidad autorizada antes de mostrar datos o permitir acciones, atribuyendo cada decisión a la persona identificada.
 - **FR-036**: El sistema DEBE permitir utilizar la aplicación desde navegadores de escritorio y móvil con conexión a Internet, sin depender de un modo sin conexión.
+- **FR-037**: El sistema DEBE reconocer el CSV de CaixaBank con columnas `Concepto`, `Fecha`, `Importe` y `Saldo`, extrayendo del importe tanto el valor firmado como la moneda ISO integrada.
+- **FR-038**: El sistema DEBE permitir mapear formatos bancarios desconocidos con moneda en una columna, integrada en el importe o fijada expresamente por el usuario, sin asumir una moneda por defecto.
+- **FR-039**: El sistema DEBE conservar perfiles de mapeo auditados y aplicarlos de nuevo solo cuando coincidan la fuente y la estructura acreditada del archivo.
 
 ### Entidades clave
 
@@ -273,6 +276,7 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 - **Lote de procesamiento**: conjunto acotado de correos o documentos revisados en una ejecución; conserva alcance, resultados, errores y punto de continuidad.
 - **Archivo de factura**: copia conservada de una factura válida, identificada mediante un nombre normalizado y organizada por el periodo de emisión.
 - **Movimiento bancario**: apunte aportado para conciliación; contiene fecha, concepto, importe, moneda y clasificación como cargo, ingreso o traspaso.
+- **Formato bancario**: perfil activo o histórico que relaciona una fuente y firma de encabezados con sus columnas, separador y forma acreditada de obtener la moneda.
 - **Coincidencia de conciliación**: relación sustentada entre una factura y uno o varios movimientos, con el resultado y la evidencia que justifican la decisión.
 - **Métrica mensual**: recuento de facturas procesadas por mes y media calculada para un periodo claramente definido.
 

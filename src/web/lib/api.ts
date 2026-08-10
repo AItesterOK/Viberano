@@ -1,6 +1,6 @@
-import type { AccountantExport, ApiResult, AppSnapshot, BankImport, Batch, DocumentPreview, ExpenseCategory, InvoiceDocument, MonthlyClose, ReconciliationLink, ReviewDraft, ReviewSaveResult, Supplier } from '../types';
+import type { AccountantExport, ApiResult, AppSnapshot, BankFormat, BankImport, BankMapping, Batch, DocumentPreview, ExpenseCategory, InvoiceDocument, MonthlyClose, ReconciliationLink, ReviewDraft, ReviewSaveResult, Supplier } from '../types';
 import { createMockSnapshot } from './mockData';
-import { buildMonthlyMetrics, validateInvoice } from './domain';
+import { buildMonthlyMetrics, normalizeText, validateInvoice } from './domain';
 
 declare global {
   interface Window {
@@ -219,9 +219,10 @@ export const api = {
     return ok({ source: structuredClone(mergedSource), target: structuredClone(mergedTarget) });
   },
 
-  async previewBankImport(input: { fileName: string; base64: string; source: string; periodFrom: string; periodTo: string; coverage: string; mapping?: Record<string, number> }): Promise<ApiResult<BankImport>> {
+  async previewBankImport(input: { fileName: string; base64: string; source: string; periodFrom: string; periodTo: string; coverage: string; mapping?: BankMapping; forceManual?: boolean }): Promise<ApiResult<BankImport>> {
     if (serverAvailable()) return callServer<BankImport>('apiPreviewBankImport', { ...input, requestId: requestId() });
     await delay(900);
+    if (input.forceManual) return { ok: false, error: { code: 'BANK_MAPPING_REQUIRED', message: 'Selecciona las columnas y cómo se obtiene la moneda.', details: { headers: ['Concepto', 'Fecha', 'Importe', 'Saldo'], headerRow: 0, headerSignature: 'concepto|fecha|importe|saldo', extension: 'csv', separator: ';', suggestedCurrencyMode: 'EMBEDDED' } }, requestId: requestId() };
     const sample = structuredClone(mock.bankImports[0]);
     sample.id = `BANK-${Date.now()}`;
     sample.fileName = input.fileName;
@@ -230,7 +231,27 @@ export const api = {
     sample.periodTo = input.periodTo;
     sample.coverage = input.coverage;
     sample.status = 'PREVISUALIZACIÓN';
+    if (/caixabank/i.test(input.fileName) && !input.mapping) { sample.bankFormatId = 'NATIVE-CAIXABANK-CSV'; sample.bankFormatName = 'CaixaBank CSV'; sample.movementCount = 58; }
+    if (input.mapping?.rememberProfile && input.mapping.profileName) {
+      const saved: BankFormat = { id: `BF-${requestId()}`, name: input.mapping.profileName, source: normalizeText(input.source), extension: 'csv', separator: ';', headerSignature: 'concepto|fecha|importe|saldo', headerRow: input.mapping.headerRow, mapping: { operationDate: input.mapping.operationDate, valueDate: input.mapping.valueDate, concept: input.mapping.concept, amount: input.mapping.amount, currency: input.mapping.currency, reference: input.mapping.reference }, currencyMode: input.mapping.currencyMode, fixedCurrency: input.mapping.fixedCurrency ?? '', active: true, native: false, createdAt: new Date().toISOString(), createdBy: mock.settings.user, updatedAt: new Date().toISOString(), updatedBy: mock.settings.user };
+      mock.bankFormats = [...mock.bankFormats.filter((item) => item.name !== saved.name), saved];
+      sample.bankFormatId = saved.id; sample.bankFormatName = saved.name;
+    }
     return ok(sample);
+  },
+
+  async listBankFormats(activeOnly = true): Promise<ApiResult<BankFormat[]>> {
+    if (serverAvailable()) return callServer<BankFormat[]>('apiListBankFormats', { activeOnly });
+    return ok(structuredClone(mock.bankFormats.filter((item) => !activeOnly || item.active)));
+  },
+
+  async deactivateBankFormat(formatId: string): Promise<ApiResult<BankFormat>> {
+    if (serverAvailable()) return callServer<BankFormat>('apiDeactivateBankFormat', { formatId, requestId: requestId() });
+    const current = mock.bankFormats.find((item) => item.id === formatId);
+    if (!current || current.native) return { ok: false, error: { code: 'BANK_FORMAT_NOT_FOUND', message: 'No se encuentra el formato bancario editable.' }, requestId: requestId() };
+    const updated = { ...current, active: false, updatedAt: new Date().toISOString(), updatedBy: mock.settings.user };
+    mock.bankFormats = mock.bankFormats.map((item) => item.id === formatId ? updated : item);
+    return ok(structuredClone(updated));
   },
 
   async confirmBankImport(bankImport: BankImport): Promise<ApiResult<BankImport>> {

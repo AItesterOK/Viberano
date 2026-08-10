@@ -183,6 +183,21 @@ function categoryFromRow_(row) {
 
 function categories_() { return safeRows_(APP.SHEETS.CATEGORIES).map(categoryFromRow_); }
 
+function bankFormatFromRow_(row) {
+  return {
+    id: String(row.FORMATO_ID || ''), name: String(row.NOMBRE || ''), source: String(row.FUENTE_NORMALIZADA || ''),
+    extension: String(row.EXTENSION || ''), separator: String(row.SEPARADOR || ''), headerSignature: String(row.FIRMA_CABECERAS || ''),
+    headerRow: Number(row.FILA_CABECERA || 0), mapping: safeJsonParse_(row.MAPEO_JSON, {}), currencyMode: String(row.MODO_MONEDA || 'COLUMN'),
+    fixedCurrency: String(row.MONEDA_FIJA || ''), active: toBoolean_(row.ACTIVO), native: toBoolean_(row.NATIVO),
+    createdAt: String(row.CREADO_EN || ''), createdBy: String(row.CREADO_POR || ''), updatedAt: String(row.ACTUALIZADO_EN || ''), updatedBy: String(row.ACTUALIZADO_POR || ''),
+    __row: row.__row,
+  };
+}
+
+function bankFormats_(activeOnly) {
+  return safeRows_(APP.SHEETS.BANK_FORMATS).map(bankFormatFromRow_).filter(function (item) { return !activeOnly || item.active; });
+}
+
 function exportFromRow_(row) {
   return { id: String(row.EXPORTACION_ID || ''), period: String(row.PERIODO || ''), status: String(row.ESTADO || ''), folderUrl: String(row.CARPETA_URL || '') || undefined, files: safeJsonParse_(row.ARCHIVOS_JSON, []), manifestHash: String(row.MANIFEST_HASH || '') || undefined, createdAt: String(row.CREADO_EN || ''), createdBy: String(row.CREADO_POR || ''), error: String(row.ERROR || '') || undefined };
 }

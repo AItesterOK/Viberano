@@ -329,10 +329,24 @@ td small { display: block; margin-top: 3px; color: var(--ink-muted); font-size: 
 
 .bank-upload { margin-bottom: 20px; }
 .bank-form { grid-template-columns: 1.1fr 1fr .7fr .7fr 1.2fr auto; align-items: end; }
+.bank-upload__actions { display: flex; gap: 8px; align-items: center; }
 .mapping-panel { margin-top: 14px; padding: 14px; border: 1px solid rgba(0, 98, 255, .15); border-radius: var(--radius-sm); background: var(--info-bg); display: grid; grid-template-columns: 1.4fr repeat(3, minmax(110px, 1fr)); gap: 10px; align-items: end; }
-.mapping-panel > div:first-child { grid-row: span 2; align-self: start; }
+.mapping-panel__intro { grid-row: span 2; align-self: start; min-width: 0; }
 .mapping-panel strong { color: var(--ink-primary); font-size: 10px; }
 .mapping-panel p { margin: 4px 0 0; color: var(--ink-secondary); font-size: 8px; line-height: 1.45; }
+.mapping-panel__intro small { display: block; margin-top: 8px; color: var(--info); font-size: 8px; font-weight: 700; }
+.mapping-profile { grid-column: 2 / -1; padding-top: 10px; border-top: 1px solid rgba(0, 98, 255, .12); display: grid; grid-template-columns: auto minmax(180px, 1fr) auto; gap: 12px; align-items: end; }
+.mapping-profile > button { min-height: 36px; border: 0; background: transparent; color: var(--repara-blue); font: inherit; font-size: 9px; font-weight: 700; cursor: pointer; }
+.bank-formats { margin-bottom: 20px; padding: 20px 22px; }
+.bank-formats .subhead { margin-bottom: 12px; }
+.bank-formats .subhead > span { color: var(--ink-tertiary); font-size: 9px; font-weight: 700; }
+.bank-format-list { display: grid; gap: 1px; background: var(--line-soft); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); overflow: hidden; }
+.bank-format-list article { min-width: 0; padding: 12px 14px; background: var(--paper); display: grid; grid-template-columns: 36px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; }
+.bank-format-icon { width: 34px; height: 34px; border-radius: 9px; background: var(--info-bg); color: var(--repara-blue); display: grid; place-items: center; }
+.bank-format-list strong { color: var(--ink-primary); font-size: 10px; }
+.bank-format-list p { margin: 3px 0; color: var(--ink-secondary); font-size: 8px; overflow-wrap: anywhere; }
+.bank-format-list small { color: var(--ink-tertiary); font-size: 8px; }
+.format-used { width: fit-content; margin-top: 8px; padding: 5px 8px; border-radius: 6px; background: var(--success-bg); color: var(--success); display: flex; align-items: center; gap: 5px; font-size: 8px; font-weight: 700; }
 .reconciliation { padding: 22px; }
 .reconciliation-summary { margin: 18px 0; padding: 14px 0; border-block: 1px solid var(--line-soft); display: grid; grid-template-columns: repeat(4, 1fr); }
 .movement-list { display: grid; gap: 8px; }
@@ -468,7 +482,8 @@ td small { display: block; margin-top: 3px; color: var(--ink-muted); font-size: 
   .supplier-grid { grid-template-columns: repeat(2, 1fr); }
   .bank-form { grid-template-columns: repeat(3, 1fr); }
   .mapping-panel { grid-template-columns: repeat(3, 1fr); }
-  .mapping-panel > div:first-child { grid-column: 1 / -1; grid-row: auto; }
+  .mapping-panel__intro { grid-column: 1 / -1; grid-row: auto; }
+  .mapping-profile { grid-column: 1 / -1; }
   .movement-list article { grid-template-columns: 38px 1fr auto; }
   .match-card { grid-column: 2; }
   .movement-actions { grid-column: 3; grid-row: 2; }
@@ -539,6 +554,11 @@ td small { display: block; margin-top: 3px; color: var(--ink-muted); font-size: 
   .review-detail__source-actions .button { width: 100%; }
   .review-grid, .form-grid, .bank-form { grid-template-columns: 1fr; }
   .mapping-panel { grid-template-columns: 1fr; }
+  .bank-upload__actions, .mapping-profile { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; }
+  .bank-upload__actions .button { width: 100%; }
+  .mapping-profile { grid-column: 1; }
+  .bank-format-list article { grid-template-columns: 36px minmax(0, 1fr); }
+  .bank-format-list article > .status, .bank-format-list article > .button { grid-column: 2; justify-self: start; }
   .decision-control__head { align-items: flex-start; flex-direction: column; gap: 4px; }
   .decision-control__options { flex-direction: column; }
   .decision-control__options .button { width: 100%; }

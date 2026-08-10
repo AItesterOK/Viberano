@@ -1,4 +1,4 @@
-import type { AppSnapshot, AuditEvent, BankImport, Batch, ExpenseCategory, InvoiceDocument, InvoiceRecord, Supplier } from '../types';
+import type { AppSnapshot, AuditEvent, BankFormat, BankImport, Batch, ExpenseCategory, InvoiceDocument, InvoiceRecord, Supplier } from '../types';
 import { buildMonthlyMetrics } from './domain';
 
 // Datos sintéticos para desarrollo local. No proceden de correos, facturas ni extractos reales.
@@ -73,6 +73,10 @@ export const mockBankImport: BankImport = {
   ],
 };
 
+export const mockBankFormats: BankFormat[] = [
+  { id: 'NATIVE-CAIXABANK-CSV', name: 'CaixaBank CSV', source: 'caixabank', extension: 'csv', separator: ';', headerSignature: 'concepto|fecha|importe|saldo', headerRow: 0, mapping: { operationDate: 1, valueDate: 1, concept: 0, amount: 2 }, currencyMode: 'EMBEDDED', fixedCurrency: '', active: true, native: true, createdAt: '', createdBy: '', updatedAt: '', updatedBy: '' },
+];
+
 export function createMockSnapshot(): AppSnapshot {
   const metrics = buildMonthlyMetrics(mockInvoices, new Date('2026-07-31T12:00:00Z'));
   return {
@@ -84,6 +88,7 @@ export function createMockSnapshot(): AppSnapshot {
     categories: mockCategories,
     metrics,
     bankImports: [mockBankImport],
+    bankFormats: mockBankFormats,
     audit: mockAudit,
     reviewCount: 1,
     processedCount: 7,

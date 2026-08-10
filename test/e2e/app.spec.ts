@@ -79,6 +79,37 @@ test('expone revisión humana, proveedores y conciliación sin declarar impagos'
   await expect(page.getByText(/impagada/i)).toHaveCount(0);
 });
 
+test('reconoce automáticamente el CSV de CaixaBank con moneda integrada', async ({ page }) => {
+  await page.goto('/');
+  if ((page.viewportSize()?.width ?? 1200) < 860) {
+    await page.getByRole('button', { name: /Más/ }).click();
+    await page.getByRole('button', { name: 'Conciliación' }).last().click();
+  } else await page.getByRole('button', { name: 'Conciliación' }).first().click();
+  await expect(page.getByText('CaixaBank CSV').first()).toBeVisible();
+  await page.getByLabel('Archivo').setInputFiles({ name: 'CaixaBank_sintetico.csv', mimeType: 'text/csv', buffer: Buffer.from('Concepto;Fecha;Importe;Saldo\nFACTURA DEMO;20/07/2026;-12,34EUR;-100,00EUR') });
+  await page.getByLabel('Cuenta o fuente').fill('CaixaBank');
+  await page.getByRole('button', { name: 'Previsualizar' }).click();
+  await expect(page.getByText('58 movimientos')).toBeVisible();
+  await expect(page.getByText('Formato aplicado: CaixaBank CSV')).toBeVisible();
+});
+
+test('permite guardar y reutilizar un mapeo manual de CSV', async ({ page }) => {
+  await page.goto('/');
+  if ((page.viewportSize()?.width ?? 1200) < 860) {
+    await page.getByRole('button', { name: /Más/ }).click();
+    await page.getByRole('button', { name: 'Conciliación' }).last().click();
+  } else await page.getByRole('button', { name: 'Conciliación' }).first().click();
+  await page.getByLabel('Archivo').setInputFiles({ name: 'cuenta-personalizada.csv', mimeType: 'text/csv', buffer: Buffer.from('Concepto;Fecha;Importe;Saldo\nPAGO DEMO;20/07/2026;-12,34EUR;-100,00EUR') });
+  await page.getByLabel('Cuenta o fuente').fill('Cuenta personalizada');
+  await page.getByRole('button', { name: 'Mapear manualmente' }).click();
+  await expect(page.getByText('Mapear formato bancario')).toBeVisible();
+  await expect(page.getByLabel('Origen de la moneda *')).toHaveValue('EMBEDDED');
+  await expect(page.getByLabel('Nombre del perfil *')).toHaveValue('Cuenta personalizada CSV');
+  await page.getByRole('button', { name: 'Aplicar mapeo' }).click();
+  await expect(page.getByText('Formato aplicado: Cuenta personalizada CSV')).toBeVisible();
+  await expect(page.getByText('Cuenta personalizada CSV').first()).toBeVisible();
+});
+
 test('crea y asocia un proveedor desde el documento sin aprobar la factura', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Revisión/ }).first().click();
