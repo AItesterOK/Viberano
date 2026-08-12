@@ -196,7 +196,7 @@ function analyzeAttachment_(batchId, messageId, attachment, metadata, sourceKey,
   const id = 'DOC-' + uuid_();
   appendObject_(APP.SHEETS.DOCUMENTS, {
     DOCUMENTO_ID: id, LOTE_ID: batchId, MESSAGE_ID: messageId, ATTACHMENT_ID: attachment.attachmentId, SOURCE_KEY: sourceKey, NOMBRE_ORIGINAL: attachment.filename,
-    REMITENTE: metadata.sender, DESTINATARIOS: metadata.recipients || '', DIRECCION_CORREO: metadata.direction || 'ENTRANTE', ASUNTO: metadata.subject, FECHA_CORREO: metadata.date, FECHA_FACTURA: fields.invoiceDate || '', PROVEEDOR: fields.supplier || '', PROVEEDOR_ID: fields.supplierId || '', CIF_NIF: fields.taxId || '', NUMERO_FACTURA: fields.invoiceNumber || '', IMPORTE_TOTAL: fields.total === undefined || fields.total === null ? '' : fields.total, MONEDA: fields.currency || '', FASE: decision.phase, ESTADO_PROPUESTO: decision.status, ESTADO_FINAL: '', MOTIVO_REVISION: decision.reason || '', EVIDENCIA_JSON: JSON.stringify(decision.evidence || []), HASH_PDF: hash, GMAIL_URL: metadata.gmailUrl, SELECCIONADO: decision.phase === 'LISTO PARA APROBAR', ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, ERROR: '', REQUEST_ID: requestId, PROVEEDOR_NO_HABITUAL: false,
+    REMITENTE: metadata.sender, DESTINATARIOS: metadata.recipients || '', DIRECCION_CORREO: metadata.direction || 'ENTRANTE', ASUNTO: metadata.subject, FECHA_CORREO: metadata.date, FECHA_FACTURA: fields.invoiceDate || '', PROVEEDOR: fields.supplier || '', PROVEEDOR_ID: fields.supplierId || '', CIF_NIF: fields.taxId || '', NUMERO_FACTURA: fields.invoiceNumber || '', IMPORTE_TOTAL: fields.total === undefined || fields.total === null ? '' : fields.total, MONEDA: fields.currency || '', CATEGORIA_ID: fields.categoryId || '', FASE: decision.phase, ESTADO_PROPUESTO: decision.status, ESTADO_FINAL: '', MOTIVO_REVISION: decision.reason || '', EVIDENCIA_JSON: JSON.stringify(decision.evidence || []), HASH_PDF: hash, GMAIL_URL: metadata.gmailUrl, SELECCIONADO: decision.phase === 'LISTO PARA APROBAR', ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, ERROR: '', REQUEST_ID: requestId, PROVEEDOR_NO_HABITUAL: false,
   });
   logEvent_('INFO', 'DOCUMENTO_ANALIZADO', id, attachment.filename, { status: decision.status, hash: hash }, batchId, requestId, user);
 }
@@ -256,10 +256,13 @@ function classifyInvoiceText_(text, sender, subject, fileName, emailDate) {
   const totalResult = extractInvoiceTotal_(text);
   const extractedTotal = totalResult.value;
   const total = creditNoteTerm && extractedTotal !== null ? -Math.abs(extractedTotal) : extractedTotal;
-  const currency = inferInvoiceCurrency_(text, totalResult.currencyToken);
-  const fields = { supplier: provider ? provider.name : '', supplierId: provider ? provider.id : '', taxId: provider ? provider.taxId : '', invoiceNumber: invoiceNumber, invoiceDate: dateResult.value, total: total, currency: currency };
+  const extractedCurrency = inferInvoiceCurrency_(text, totalResult.currencyToken);
+  const currency = extractedCurrency || (ruleMatch && ruleMatch.usualCurrency) || '';
+  const fields = { supplier: provider ? provider.name : '', supplierId: provider ? provider.id : '', taxId: provider ? provider.taxId : '', invoiceNumber: invoiceNumber, invoiceDate: dateResult.value, total: total, currency: currency, categoryId: ruleMatch && provider && ruleMatch.provider.id === provider.id ? ruleMatch.defaultCategoryId || '' : '' };
   if (creditNoteTerm) evidence.push({ field: 'documentType', value: 'NOTA DE CRÉDITO', source: 'PDF', excerpt: creditNoteTerm + (fileName ? ' · ' + fileName : '') });
   if (provider) evidence.push({ field: 'supplier', value: provider.name, source: providerMatch.source, excerpt: providerMatch.evidence });
+  if (!extractedCurrency && ruleMatch && ruleMatch.usualCurrency) evidence.push({ field: 'currency', value: ruleMatch.usualCurrency, source: 'REGLA CONFIRMADA', excerpt: 'Moneda habitual propuesta; requiere aprobación humana.' });
+  if (fields.categoryId) evidence.push({ field: 'categoryId', value: fields.categoryId, source: 'REGLA CONFIRMADA', excerpt: 'Categoría predeterminada propuesta; requiere aprobación humana.' });
   if (fields.invoiceNumber) evidence.push({ field: 'invoiceNumber', value: fields.invoiceNumber, source: numberResult.source, excerpt: numberResult.excerpt });
   if (fields.invoiceDate) evidence.push({ field: 'invoiceDate', value: fields.invoiceDate, source: dateResult.source, excerpt: dateResult.excerpt });
   if (total !== null) evidence.push({ field: 'total', value: total + ' ' + currency, source: 'PDF', excerpt: totalResult.excerpt });
@@ -423,6 +426,8 @@ function inferInvoiceCurrency_(text, token) {
 }
 
 function providerFromRules_(text, sender, subject, providers) {
+  const learned = typeof applySupplierRules_ === 'function' ? applySupplierRules_({ senderEmail: senderEmail_(sender), text: text, subject: subject }, providers) : null;
+  if (learned) return learned;
   const rows = getRows_(APP.SHEETS.RULES).filter(function (row) { return toBoolean_(row.ACTIVA); }).sort(function (a, b) { return Number(b.PRIORIDAD || 0) - Number(a.PRIORIDAD || 0); });
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];

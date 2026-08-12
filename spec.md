@@ -1,8 +1,9 @@
 # Especificación de Feature: Gestión de facturas de gasto para MicroPymes
 
-**Rama**: `001-gestion-facturas-gasto`
+**Rama**: `codex/reparapro-gastos-1-9`
 **Creada**: 2026-07-20
-**Estado**: Borrador
+**Actualizada**: 2026-08-12
+**Estado**: En implementación
 **Input**: Descripción del usuario: "Documentar y reproducir el flujo realizado para localizar, validar, archivar y registrar facturas de gasto, gestionar proveedores, obtener métricas mensuales y compararlas con movimientos bancarios, sin inventar datos ni duplicar documentos."
 
 ## Problema y propósito
@@ -187,7 +188,65 @@ Como responsable de administración, quiero comparar las facturas de gasto con l
 5. **Dado** varias coincidencias posibles para una factura, **Cuando** no existe evidencia para elegir una de forma inequívoca, **Entonces** el caso queda pendiente de revisión manual.
 6. **Dado** que el extracto cubre solo parte del mes o solo una cuenta, **Cuando** se presenta el reporte, **Entonces** se indica expresamente el periodo y la cobertura disponibles.
 
-### Historia de Usuario 10 - Procesar por lotes y reanudar sin repetir (Prioridad: P3)
+### Historia de Usuario 10 - Organizar la revisión semanal (Prioridad: P1)
+
+Como responsable de administración, quiero encontrar en una sola mesa la siguiente acción necesaria y las tareas pendientes, para mantener facturas y banco al día sin reconstruir mentalmente el proceso entre pantallas.
+
+**Por qué esta prioridad**: la organización semanal es el punto de entrada del trabajo y reduce omisiones aunque las capacidades de detalle ya existan.
+
+**Test independiente**: se puede probar con pendientes de captura, validación, conciliación y cierre, verificando su orden y los accesos a cada resolución.
+
+**Escenarios de aceptación**:
+
+1. **Dado** que existen tareas pendientes en varias fases, **Cuando** se abre la mesa semanal, **Entonces** se muestra una siguiente acción recomendada y las tareas se agrupan en `Capturar`, `Validar`, `Conciliar` y `Cerrar`.
+2. **Dado** que una tarea corresponde a un documento o movimiento concreto, **Cuando** se selecciona, **Entonces** se abre directamente el contexto necesario para resolverla.
+3. **Dado** que no existen pendientes para la semana, **Cuando** se abre la mesa, **Entonces** se informa que no hay acciones pendientes sin inventar actividad.
+
+### Historia de Usuario 11 - Comprender la cobertura real (Prioridad: P1)
+
+Como responsable de administración, quiero ver los periodos cubiertos, parciales y sin revisar de Gmail y de cada fuente bancaria, para continuar por el punto correcto y saber los límites de cualquier conclusión.
+
+**Por qué esta prioridad**: una única fecha de avance puede ocultar huecos entre recorridos separados y provocar que se omitan correos o se interpreten mal extractos parciales.
+
+**Test independiente**: se puede probar con dos recorridos de Gmail separados y extractos de distintas cuentas, comprobando que los intervalos y huecos se conservan.
+
+**Escenarios de aceptación**:
+
+1. **Dado** recorridos completados en enero-febrero y julio, **Cuando** se consulta la cobertura, **Entonces** ambos intervalos aparecen separados y el hueco intermedio permanece visible.
+2. **Dado** un extracto que cubre solo parte de un mes, **Cuando** se consulta su carril, **Entonces** se identifica como `PARCIAL` y no como mes completo.
+3. **Dado** un día con mensajes todavía pendientes, **Cuando** se muestra el siguiente punto de continuación, **Entonces** se conserva ese mismo día hasta finalizarlo sin saltos.
+
+### Historia de Usuario 12 - Resolver propuestas de conciliación (Prioridad: P1)
+
+Como responsable de administración, quiero comparar factura y movimiento lado a lado y decidir varias propuestas inequívocas juntas, para conciliar con rapidez sin perder el control humano.
+
+**Por qué esta prioridad**: la comparación por desplegables dificulta evaluar evidencia y escala mal cuando crece el número de movimientos.
+
+**Test independiente**: se puede probar con propuestas de confianza alta, media y baja, además de un caso parcial o múltiple.
+
+**Escenarios de aceptación**:
+
+1. **Dado** una propuesta, **Cuando** se consulta, **Entonces** muestra factura, movimiento, diferencia, cobertura, evidencia y nivel de confianza explicable.
+2. **Dado** varias propuestas únicas de confianza alta, **Cuando** el responsable las selecciona y confirma, **Entonces** se guardan juntas y cada decisión conserva trazabilidad.
+3. **Dado** una propuesta ambigua, parcial o múltiple, **Cuando** se revisa, **Entonces** permanece como caso complejo hasta una decisión expresa.
+4. **Dado** un extracto parcial sin coincidencia, **Cuando** se muestra el estado, **Entonces** utiliza `SIN COINCIDENCIA EN ESTA COBERTURA` y nunca afirma un impago.
+
+### Historia de Usuario 13 - Reutilizar reglas y frecuencias acreditadas (Prioridad: P2)
+
+Como responsable de administración, quiero guardar reglas y frecuencias de proveedor después de confirmarlas, para recibir mejores sugerencias sin delegar las decisiones finales.
+
+**Por qué esta prioridad**: reduce trabajo repetitivo una vez que la mesa y la conciliación guiada ya permiten resolver las tareas con seguridad.
+
+**Test independiente**: se puede probar creando, aplicando como sugerencia y desactivando una regla, además de configurar un proveedor recurrente.
+
+**Escenarios de aceptación**:
+
+1. **Dado** una regla acreditada por dominio, remitente, identificación fiscal, alias o concepto bancario, **Cuando** aparece un documento compatible, **Entonces** la regla propone proveedor, categoría o moneda sin aprobar el documento.
+2. **Dado** una regla desactivada, **Cuando** se analizan documentos futuros, **Entonces** deja de proponer resultados y su historial se conserva.
+3. **Dado** un proveedor con frecuencia confirmada, **Cuando** llega el periodo esperado sin documento localizado, **Entonces** aparece una tarea para buscarlo o marcarlo como no esperado ese periodo.
+4. **Dado** un proveedor con tres facturas históricas pero sin frecuencia confirmada, **Cuando** se detecta el patrón, **Entonces** se sugiere la recurrencia sin activarla automáticamente.
+
+### Historia de Usuario 14 - Procesar por lotes y reanudar sin repetir (Prioridad: P3)
 
 Como responsable de administración, quiero procesar los correos en lotes controlados y continuar desde el último punto completado, para avanzar sobre históricos grandes de forma segura.
 
@@ -219,6 +278,10 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 - Una factura se paga mediante varios movimientos o un movimiento agrupa varias facturas.
 - El pago se realiza desde una cuenta, tarjeta o medio no incluido en los extractos aportados.
 - El extracto bancario cubre un periodo incompleto.
+- Existen recorridos de Gmail completos separados por uno o varios huecos.
+- Dos movimientos obtienen la misma puntuación para una misma factura.
+- Una regla activa deja de representar al proveedor y debe desactivarse sin borrar su historial.
+- Un proveedor recurrente no emite factura durante un periodo por una excepción legítima.
 - El mes sobre el que se calcula la media aún no ha terminado.
 - Un proveedor se desactiva después de haberse archivado facturas históricas suyas.
 
@@ -258,13 +321,27 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 - **FR-030**: El sistema DEBE identificar los cargos bancarios relevantes para los que no exista una factura registrada.
 - **FR-031**: El reporte de conciliación DEBE indicar el periodo y las fuentes bancarias consideradas.
 - **FR-032**: El sistema DEBE detectar notas de crédito y abonos, registrar su total como importe negativo y archivarlos en la misma estructura de gastos; las facturas rectificativas ambiguas permanecen en `REVISIÓN MANUAL`.
-- **FR-033**: El sistema DEBE detectar posibles conciliaciones de un pago contra varias facturas o de varios pagos contra una factura, mostrarlas como `REVISIÓN MANUAL` y evitar su confirmación automática en esta primera versión.
+- **FR-033**: El sistema DEBE permitir conciliaciones de un pago contra varias facturas o de varios pagos contra una factura únicamente después de decisiones humanas expresas, conservando importes asignados y saldos pendientes.
 - **FR-034**: El sistema DEBE iniciar el procesamiento únicamente por una acción expresa de una persona autorizada y no mediante ejecuciones programadas.
 - **FR-035**: El sistema DEBE exigir una identidad autorizada antes de mostrar datos o permitir acciones, atribuyendo cada decisión a la persona identificada.
 - **FR-036**: El sistema DEBE permitir utilizar la aplicación desde navegadores de escritorio y móvil con conexión a Internet, sin depender de un modo sin conexión.
 - **FR-037**: El sistema DEBE reconocer el CSV de CaixaBank con columnas `Concepto`, `Fecha`, `Importe` y `Saldo`, extrayendo del importe tanto el valor firmado como la moneda ISO integrada.
 - **FR-038**: El sistema DEBE permitir mapear formatos bancarios desconocidos con moneda en una columna, integrada en el importe o fijada expresamente por el usuario, sin asumir una moneda por defecto.
 - **FR-039**: El sistema DEBE conservar perfiles de mapeo auditados y aplicarlos de nuevo solo cuando coincidan la fuente y la estructura acreditada del archivo.
+- **FR-040**: El sistema DEBE presentar las tareas semanales agrupadas en `Capturar`, `Validar`, `Conciliar` y `Cerrar`.
+- **FR-041**: El sistema DEBE identificar una siguiente acción recomendada y permitir abrir el contexto necesario para resolverla.
+- **FR-042**: El sistema DEBE representar por separado cada intervalo de cobertura de Gmail y de cada fuente bancaria.
+- **FR-043**: El sistema DEBE distinguir cobertura `COMPLETA`, `PARCIAL`, `SIN REVISAR` y `CON HUECOS` sin deducir tramos no acreditados.
+- **FR-044**: El sistema DEBE comparar cada propuesta de conciliación mostrando factura, movimiento, diferencia, cobertura, evidencia y confianza explicable.
+- **FR-045**: El sistema DEBE permitir guardar conjuntamente hasta veinte decisiones de conciliación sin convertir la selección en aprobación automática.
+- **FR-046**: El sistema DEBE mantener los casos parciales, múltiples o ambiguos en una resolución manual específica.
+- **FR-047**: El sistema DEBE permitir crear, consultar y desactivar reglas acreditadas de proveedor conservando su historial.
+- **FR-048**: Las reglas de proveedor solo DEBEN proponer valores y nunca crear proveedores, aprobar documentos o confirmar conciliaciones por sí mismas.
+- **FR-049**: El sistema DEBE permitir indicar una frecuencia esperada para un proveedor y omitir justificadamente un periodo concreto.
+- **FR-050**: El sistema DEBE mostrar vencimientos próximos o superados sin afirmar que una factura está impagada cuando el pago no esté confirmado.
+- **FR-051**: El sistema DEBE permitir guardar una revisión y abrir el siguiente documento pendiente en una única acción.
+- **FR-052**: Las listas crecientes DEBEN cargarse por páginas sin exigir la descarga previa de todo el histórico.
+- **FR-053**: La incorporación manual de PDF o imágenes queda reservada para una etapa posterior y deberá reutilizar los mismos controles de evidencia, duplicado y aprobación.
 
 ### Entidades clave
 
@@ -278,6 +355,11 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 - **Movimiento bancario**: apunte aportado para conciliación; contiene fecha, concepto, importe, moneda y clasificación como cargo, ingreso o traspaso.
 - **Formato bancario**: perfil activo o histórico que relaciona una fuente y firma de encabezados con sus columnas, separador y forma acreditada de obtener la moneda.
 - **Coincidencia de conciliación**: relación sustentada entre una factura y uno o varios movimientos, con el resultado y la evidencia que justifican la decisión.
+- **Tarea semanal**: acción calculada a partir del estado documental o bancario, con fase, prioridad, motivo y destino de resolución.
+- **Segmento de cobertura**: intervalo acreditado de una fuente, con estado completo, parcial, sin revisar o con huecos y su evidencia de origen.
+- **Propuesta de conciliación**: comparación todavía no aplicada entre factura y movimiento, con diferencia, cobertura, evidencia y confianza explicable.
+- **Regla de proveedor**: criterio confirmado que puede sugerir proveedor, categoría o moneda sin ejecutar decisiones definitivas.
+- **Frecuencia de proveedor**: expectativa confirmada de aparición periódica que puede generar una tarea, pero no una factura ni una conclusión contable.
 - **Métrica mensual**: recuento de facturas procesadas por mes y media calculada para un periodo claramente definido.
 
 ## Criterios de éxito *(obligatorio)*
@@ -295,6 +377,12 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 - **SC-009**: El 100 % de las conciliaciones distingue entre coincidencia encontrada, no encontrada en los extractos aportados y cargo sin factura registrada.
 - **SC-010**: Ninguna factura se etiqueta como impagada únicamente por no aparecer en un extracto parcial.
 - **SC-011**: Cada informe de conciliación identifica el periodo y la cobertura bancaria utilizados, de modo que el responsable pueda interpretar sus límites.
+- **SC-012**: El responsable puede identificar la siguiente acción y los huecos de cobertura en menos de diez segundos durante una prueba de uso.
+- **SC-013**: El 100 % de los recorridos separados y extractos parciales conserva sus límites visibles.
+- **SC-014**: Veinte decisiones válidas pueden guardarse conjuntamente en menos de ocho segundos con una ejecución caliente.
+- **SC-015**: El 100 % de las propuestas muestra por qué recibió su nivel de confianza antes de poder confirmarse.
+- **SC-016**: Ninguna regla de proveedor produce por sí sola una aprobación documental o conciliación definitiva.
+- **SC-017**: El 100 % de los bloqueos del cierre mensual ofrece acceso a la tarea que puede resolverlos.
 
 ## Suposiciones
 
@@ -310,6 +398,10 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 - Los extractos bancarios pueden no cubrir todas las cuentas, tarjetas, efectivo o fechas de pago utilizadas por la empresa.
 - Las facturas históricas de un proveedor se conservan aunque ese proveedor deje de utilizarse.
 - La primera versión funciona exclusivamente en línea, se inicia manualmente y no utiliza servicios de inteligencia documental de pago.
+- La rutina principal de organización es una revisión semanal iniciada por una persona autorizada.
+- Las tareas semanales se calculan a partir del estado canónico y no constituyen un segundo registro contable.
+- Las reglas y frecuencias requieren confirmación y solo producen sugerencias recuperables.
+- La entrada manual de PDF o imágenes se incorporará después de validar la mesa semanal, la cobertura y la conciliación guiada.
 - Todas las personas autorizadas disponen de las mismas capacidades y cada acción queda atribuida.
 - La cuenta inicialmente autorizada es `compras@reparapro.com`; las incorporaciones posteriores requieren validación explícita.
 - El histórico existente se capturará como línea base durante la migración y se comparará después sin publicar sus datos ni recuentos en el repositorio.
@@ -318,5 +410,5 @@ Como responsable de administración, quiero procesar los correos en lotes contro
 ## Decisiones cerradas para la primera versión
 
 1. **Documentos rectificativos**: las notas de crédito y los abonos acreditados se archivan en gastos con importe negativo; las facturas rectificativas ambiguas permanecen en revisión manual.
-2. **Conciliaciones múltiples**: las relaciones uno-a-varios y varios-a-uno se señalan para revisión, pero solo se pueden confirmar coincidencias inequívocas uno-a-uno.
+2. **Conciliaciones múltiples**: las relaciones uno-a-varios y varios-a-uno pueden confirmarse únicamente mediante asignaciones e importes decididos por una persona; nunca se aplican automáticamente.
 3. **Operación**: no existen tareas programadas ni aprobaciones automáticas; una persona autorizada inicia el análisis y confirma cada escritura definitiva.

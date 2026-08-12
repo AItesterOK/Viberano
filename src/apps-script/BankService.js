@@ -349,22 +349,25 @@ function recalculateReconciliationState_(movementIds, invoiceIds, user, requestI
 }
 
 function movementFromRow_(row, allLinks) {
-  const links = (allLinks || safeRows_(APP.SHEETS.RECONCILIATIONS)).filter(function (link) { return String(link.MOVIMIENTO_ID) === String(row.MOVIMIENTO_ID) && String(link.ESTADO) === 'CONFIRMADA'; });
-  const assignedCents = links.reduce(function (sum, link) { return sum + Math.abs(toCents_(link.IMPORTE_ASIGNADO)); }, 0);
+  const links = (allLinks || safeRows_(APP.SHEETS.RECONCILIATIONS)).filter(function (link) { return String(link.MOVIMIENTO_ID || link.movementId || '') === String(row.MOVIMIENTO_ID) && String(link.ESTADO || link.status || '') === 'CONFIRMADA'; });
+  const assignedCents = links.reduce(function (sum, link) { return sum + Math.abs(toCents_(link.IMPORTE_ASIGNADO === undefined ? link.allocatedAmount : link.IMPORTE_ASIGNADO)); }, 0);
   const totalCents = Math.abs(toCents_(row.IMPORTE));
   return { id: String(row.MOVIMIENTO_ID || ''), importId: String(row.IMPORT_ID || ''), operationDate: String(row.FECHA_OPERACION || ''), valueDate: String(row.FECHA_VALOR || ''), concept: String(row.CONCEPTO || ''), amount: Number(row.IMPORTE || 0), currency: String(row.MONEDA || ''), reference: String(row.REFERENCIA || ''), type: String(row.TIPO || 'REVISIÓN'), status: String(row.ESTADO_CONCILIACION || 'SIN CONCILIAR'), candidateInvoiceId: String(row.FACTURA_CANDIDATA_ID || '') || undefined, evidence: String(row.EVIDENCIA || '') || undefined, assignedAmount: assignedCents / 100, difference: (totalCents - assignedCents) / 100 };
 }
 
-function bankImportById_(importId) {
-  const rows = safeRows_(APP.SHEETS.MOVEMENTS).filter(function (row) { return String(row.IMPORT_ID) === String(importId); });
+function bankImportById_(importId, movementRows, reconciliationRows) {
+  const rows = (movementRows || safeRows_(APP.SHEETS.MOVEMENTS)).filter(function (row) { return String(row.IMPORT_ID) === String(importId); });
   if (!rows.length) return null;
   const first = rows[0];
-  const links = safeRows_(APP.SHEETS.RECONCILIATIONS).filter(function (row) { return String(row.IMPORT_ID) === String(importId); }).map(function (row) { return { id: String(row.CONCILIACION_ID || ''), importId: String(row.IMPORT_ID || ''), movementId: String(row.MOVIMIENTO_ID || ''), invoiceId: String(row.FACTURA_ID || ''), allocatedAmount: Number(row.IMPORTE_ASIGNADO || 0), status: String(row.ESTADO || 'PROPUESTA'), evidence: String(row.EVIDENCIA || ''), reason: String(row.MOTIVO || ''), createdAt: String(row.CREADO_EN || ''), createdBy: String(row.CREADO_POR || ''), decidedAt: String(row.DECIDIDO_EN || '') || undefined, decidedBy: String(row.DECIDIDO_POR || '') || undefined }; });
+  const rawLinks = (reconciliationRows || safeRows_(APP.SHEETS.RECONCILIATIONS)).filter(function (row) { return String(row.IMPORT_ID) === String(importId); });
+  const links = rawLinks.map(function (row) { return { id: String(row.CONCILIACION_ID || ''), importId: String(row.IMPORT_ID || ''), movementId: String(row.MOVIMIENTO_ID || ''), invoiceId: String(row.FACTURA_ID || ''), allocatedAmount: Number(row.IMPORTE_ASIGNADO || 0), status: String(row.ESTADO || 'PROPUESTA'), evidence: String(row.EVIDENCIA || ''), reason: String(row.MOTIVO || ''), createdAt: String(row.CREADO_EN || ''), createdBy: String(row.CREADO_POR || ''), decidedAt: String(row.DECIDIDO_EN || '') || undefined, decidedBy: String(row.DECIDIDO_POR || '') || undefined }; });
   return { id: String(importId), fileName: String(first.ARCHIVO_NOMBRE || ''), fileHash: String(first.ARCHIVO_HASH || ''), source: String(first.FUENTE || ''), periodFrom: String(first.PERIODO_DESDE || ''), periodTo: String(first.PERIODO_HASTA || ''), detectedPeriodFrom: String(first.PERIODO_DETECTADO_DESDE || '') || undefined, detectedPeriodTo: String(first.PERIODO_DETECTADO_HASTA || '') || undefined, warnings: safeJsonParse_(first.ADVERTENCIAS_JSON, []), coverage: String(first.COBERTURA || ''), status: String(first.ESTADO_IMPORTACION || 'PREVISUALIZACIÓN'), movementCount: rows.length, bankFormatId: String(first.FORMATO_BANCARIO_ID || '') || undefined, bankFormatName: String(first.FORMATO_BANCARIO_NOMBRE || '') || undefined, driveUrl: String(first.URL_DRIVE || '') || undefined, createdAt: String(first.CREADO_EN || ''), createdBy: String(first.CREADO_POR || ''), movements: rows.map(function (row) { return movementFromRow_(row, links); }), reconciliations: links };
 }
 
-function allBankImports_() {
+function allBankImports_(movementRows, reconciliationRows) {
+  const rows = movementRows || safeRows_(APP.SHEETS.MOVEMENTS);
+  const links = reconciliationRows || safeRows_(APP.SHEETS.RECONCILIATIONS);
   const ids = [];
-  safeRows_(APP.SHEETS.MOVEMENTS).forEach(function (row) { const id = String(row.IMPORT_ID || ''); if (id && ids.indexOf(id) === -1) ids.push(id); });
-  return ids.map(bankImportById_).filter(Boolean).sort(function (a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); });
+  rows.forEach(function (row) { const id = String(row.IMPORT_ID || ''); if (id && ids.indexOf(id) === -1) ids.push(id); });
+  return ids.map(function (id) { return bankImportById_(id, rows, links); }).filter(Boolean).sort(function (a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); });
 }

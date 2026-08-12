@@ -96,6 +96,34 @@ function approveDocument_(documentId, user, requestId) {
   return documentFromRow_(getRows_(APP.SHEETS.DOCUMENTS).find(function (item) { return item.__row === row.__row; }));
 }
 
+function approveDocuments_(payload, user, requestId) {
+  if (String(getConfigMap_().APP_MODE || 'DRY_RUN') !== 'PRODUCTION') throw appError_('DRY_RUN_ACTIVE', 'La aplicación está en modo seco. No se archivará ni registrará ningún documento.');
+  const repeated = eventByRequest_(requestId, 'DOCUMENTOS_APROBADOS_EN_CONJUNTO');
+  if (repeated) return safeJsonParse_(repeated.DATOS_JSON, {}).response || { items: [], approved: 0, failed: 0 };
+  const ids = (payload.documentIds || []).map(String).filter(Boolean).filter(function (id, index, list) { return list.indexOf(id) === index; });
+  if (!ids.length) throw appError_('EMPTY_APPROVAL', 'Selecciona al menos un documento.');
+  if (ids.length > 20) throw appError_('TOO_MANY_DOCUMENTS', 'Aprueba como máximo 20 documentos cada vez.');
+  const rows = getRows_(APP.SHEETS.DOCUMENTS);
+  const results = [];
+  ids.forEach(function (documentId, index) {
+    const row = rows.find(function (candidate) { return String(candidate.DOCUMENTO_ID || '') === documentId; });
+    try {
+      if (!row) throw appError_('DOCUMENT_NOT_FOUND', 'No se encuentra el documento.');
+      if (String(row.FASE || '') === 'FINALIZADO') { results.push({ documentId: documentId, ok: true, document: documentFromRow_(row), destination: String(row.URL_DRIVE || '') || undefined }); return; }
+      if (String(row.FASE || '') !== 'LISTO PARA APROBAR' && String(row.FASE || '') !== 'ERROR') throw appError_('DOCUMENT_NOT_READY', 'El documento todavía necesita revisión humana.');
+      finalizeDocument_(row, user, requestId + '-' + index);
+      const saved = getRows_(APP.SHEETS.DOCUMENTS).find(function (candidate) { return candidate.__row === row.__row; });
+      results.push({ documentId: documentId, ok: true, document: documentFromRow_(saved), destination: String(saved.URL_DRIVE || '') || undefined });
+    } catch (error) {
+      if (row) updateObjectRow_(APP.SHEETS.DOCUMENTS, row.__row, { FASE: 'ERROR', ERROR: error.message || String(error), ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, REQUEST_ID: requestId + '-' + index });
+      results.push({ documentId: documentId, ok: false, error: error.message || String(error) });
+    }
+  });
+  const response = { items: results, approved: results.filter(function (item) { return item.ok; }).length, failed: results.filter(function (item) { return !item.ok; }).length };
+  logEvent_('INFO', 'DOCUMENTOS_APROBADOS_EN_CONJUNTO', '', response.approved + ' documentos aprobados; ' + response.failed + ' con error', { response: response }, '', requestId, user);
+  return response;
+}
+
 function approveBatch_(payload, user, requestId) {
   const config = getConfigMap_();
   if (String(config.APP_MODE || 'DRY_RUN') !== 'PRODUCTION') throw appError_('DRY_RUN_ACTIVE', 'La aplicación está en modo seco. Cambia a PRODUCCIÓN de forma explícita antes de aprobar.');

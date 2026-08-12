@@ -1,4 +1,4 @@
-import type { AccountantExport, ApiResult, AppSnapshot, BankFormat, BankImport, BankMapping, Batch, DocumentPreview, ExpenseCategory, InvoiceDocument, MonthlyClose, ReconciliationLink, ReviewDraft, ReviewSaveResult, Supplier } from '../types';
+import type { AccountantExport, ApiResult, AppSnapshot, AuditEvent, BankFormat, BankImport, BankMapping, Batch, CoverageMap, DocumentApprovalResult, DocumentPreview, ExpenseCategory, InvoiceDocument, InvoiceRecord, MonthlyClose, PagedResult, ReconciliationCandidatePage, ReconciliationCandidateStatus, ReconciliationDecisionItem, ReconciliationDecisionResult, ReconciliationLink, ReviewDraft, ReviewSaveResult, Supplier, SupplierRule, SupplierSchedule, WeeklyWorkbench } from '../types';
 import { createMockSnapshot } from './mockData';
 import { buildMonthlyMetrics, normalizeText, validateInvoice } from './domain';
 
@@ -45,6 +45,94 @@ export const api = {
     if (serverAvailable()) return callServer<AppSnapshot>('apiBootstrap');
     await delay(420);
     return ok(structuredClone(mock));
+  },
+
+  async listInvoices(input: { query?: string; status?: string; period?: string; cursor?: string; limit?: number } = {}): Promise<ApiResult<PagedResult<InvoiceRecord>>> {
+    if (serverAvailable()) return callServer<PagedResult<InvoiceRecord>>('apiListInvoices', { filters: { query: input.query, status: input.status && input.status !== 'TODOS' ? input.status : undefined, period: input.period }, cursor: input.cursor, limit: input.limit ?? 50 });
+    await delay();
+    const filtered = mock.invoices.filter((item) => (!input.status || input.status === 'TODOS' || item.status === input.status) && (!input.period || item.date.slice(0, 7) === input.period) && (!input.query || normalizeText([item.supplier, item.number, item.taxId, item.originalName].join(' ')).includes(normalizeText(input.query))));
+    const offset = Math.max(Number(input.cursor || 0), 0); const limit = input.limit ?? 50; const next = offset + limit < filtered.length ? String(offset + limit) : undefined;
+    return ok({ items: structuredClone(filtered.slice(offset, offset + limit)), total: filtered.length, nextCursor: next });
+  },
+
+  async listAudit(input: { query?: string; cursor?: string; limit?: number } = {}): Promise<ApiResult<PagedResult<AuditEvent>>> {
+    if (serverAvailable()) return callServer<PagedResult<AuditEvent>>('apiListAudit', { query: input.query, cursor: input.cursor, limit: input.limit ?? 50 });
+    await delay();
+    const filtered = mock.audit.filter((item) => !input.query || normalizeText([item.action, item.object, item.detail, item.user, item.batchId].join(' ')).includes(normalizeText(input.query)));
+    const offset = Math.max(Number(input.cursor || 0), 0); const limit = input.limit ?? 50; const next = offset + limit < filtered.length ? String(offset + limit) : undefined;
+    return ok({ items: structuredClone(filtered.slice(offset, offset + limit)), total: filtered.length, nextCursor: next });
+  },
+
+  async getWeeklyWorkbench(weekStart: string): Promise<ApiResult<WeeklyWorkbench>> {
+    if (serverAvailable()) return callServer<WeeklyWorkbench>('apiGetWeeklyWorkbench', { weekStart });
+    await delay();
+    const workbench = structuredClone(mock.weeklyWorkbench!);
+    workbench.weekStart = weekStart;
+    workbench.weekEnd = new Date(new Date(`${weekStart}T12:00:00`).getTime() + 6 * 86400000).toISOString().slice(0, 10);
+    return ok(workbench);
+  },
+
+  async getCoverageMap(from: string, to: string): Promise<ApiResult<CoverageMap>> {
+    if (serverAvailable()) return callServer<CoverageMap>('apiGetCoverageMap', { from, to });
+    await delay();
+    return ok({ ...structuredClone(mock.coverageMap!), from, to });
+  },
+
+  async listReconciliationCandidates(input: { importId?: string; status?: ReconciliationCandidateStatus; filters?: { confidence?: 'ALTA' | 'MEDIA' | 'BAJA'; source?: string; query?: string }; cursor?: string; limit?: number }): Promise<ApiResult<ReconciliationCandidatePage>> {
+    if (serverAvailable()) return callServer<ReconciliationCandidatePage>('apiListReconciliationCandidates', input);
+    await delay();
+    const items = (mock.reconciliationCandidates ?? []).filter((item) => (!input.importId || item.importId === input.importId) && (!input.status || item.status === input.status));
+    return ok({ items: structuredClone(items), total: items.length });
+  },
+
+  async saveReconciliationDecisions(items: ReconciliationDecisionItem[]): Promise<ApiResult<ReconciliationDecisionResult>> {
+    if (serverAvailable()) return callServer<ReconciliationDecisionResult>('apiSaveReconciliationDecisions', { items, requestId: requestId() });
+    await delay(360);
+    const results = items.map((decision) => {
+      const candidate = mock.reconciliationCandidates?.find((item) => item.id === decision.candidateId);
+      if (!candidate) return { movementId: decision.movementId, invoiceId: decision.invoiceId, status: 'ERROR' as const, decision: decision.decision, error: 'La propuesta ya no está disponible.' };
+      candidate.status = decision.decision === 'CONFIRM' ? 'CONFIRMED' : 'EXCLUDED';
+      candidate.safeStatusLabel = decision.decision === 'CONFIRM' ? 'COINCIDENCIA CONFIRMADA' : 'SIN COINCIDENCIA EN ESTA COBERTURA';
+      const bankImport = mock.bankImports.find((item) => item.id === candidate.importId);
+      if (bankImport) bankImport.movements = bankImport.movements.map((movement) => movement.id === decision.movementId ? { ...movement, status: decision.decision === 'CONFIRM' ? 'COINCIDENCIA CONFIRMADA' : 'SIN COINCIDENCIA EN ESTA COBERTURA' } : movement);
+      return { movementId: decision.movementId, invoiceId: decision.invoiceId, status: 'SAVED' as const, decision: decision.decision };
+    });
+    return ok({ results, saved: results.filter((item) => item.status === 'SAVED').length, failed: results.filter((item) => item.status === 'ERROR').length });
+  },
+
+  async listSupplierRules(supplierId?: string, activeOnly = false): Promise<ApiResult<SupplierRule[]>> {
+    if (serverAvailable()) return callServer<SupplierRule[]>('apiListSupplierRules', { supplierId, activeOnly });
+    const rules = (mock.supplierRules ?? []).filter((item) => (!supplierId || item.supplierId === supplierId) && (!activeOnly || item.active));
+    return ok(structuredClone(rules));
+  },
+
+  async saveSupplierRule(rule: SupplierRule): Promise<ApiResult<SupplierRule>> {
+    if (serverAvailable()) return callServer<SupplierRule>('apiSaveSupplierRule', { rule, requestId: requestId() });
+    await delay();
+    const saved = { ...rule, id: rule.id || `rule-${requestId()}`, active: true, updatedAt: new Date().toISOString(), updatedBy: mock.settings.user, createdAt: rule.createdAt || new Date().toISOString(), createdBy: rule.createdBy || mock.settings.user };
+    mock.supplierRules = (mock.supplierRules ?? []).some((item) => item.id === saved.id) ? mock.supplierRules!.map((item) => item.id === saved.id ? saved : item) : [saved, ...(mock.supplierRules ?? [])];
+    return ok(structuredClone(saved));
+  },
+
+  async deactivateSupplierRule(ruleId: string, reason: string): Promise<ApiResult<SupplierRule>> {
+    if (serverAvailable()) return callServer<SupplierRule>('apiDeactivateSupplierRule', { ruleId, reason, requestId: requestId() });
+    const rule = mock.supplierRules?.find((item) => item.id === ruleId);
+    if (!rule) return { ok: false, error: { code: 'RULE_NOT_FOUND', message: 'La regla ya no está disponible.' }, requestId: requestId() };
+    const saved = { ...rule, active: false, updatedAt: new Date().toISOString(), updatedBy: mock.settings.user };
+    mock.supplierRules = mock.supplierRules!.map((item) => item.id === ruleId ? saved : item);
+    return ok(structuredClone(saved));
+  },
+
+  async saveSupplierSchedule(schedule: SupplierSchedule): Promise<ApiResult<Supplier>> {
+    if (serverAvailable()) return callServer<Supplier>('apiSaveSupplierSchedule', { ...schedule, requestId: requestId() });
+    await delay();
+    const saved = { ...schedule };
+    mock.supplierSchedules = (mock.supplierSchedules ?? []).some((item) => item.supplierId === saved.supplierId) ? mock.supplierSchedules!.map((item) => item.supplierId === saved.supplierId ? saved : item) : [saved, ...(mock.supplierSchedules ?? [])];
+    const supplier = mock.suppliers.find((item) => item.id === schedule.supplierId);
+    if (!supplier) return { ok: false, error: { code: 'SUPPLIER_NOT_FOUND', message: 'El proveedor ya no está disponible.' }, requestId: requestId() };
+    const updated = { ...supplier, recurrent: schedule.frequency !== 'NONE', frequency: schedule.frequency, schedule };
+    mock.suppliers = mock.suppliers.map((item) => item.id === updated.id ? updated : item);
+    return ok(structuredClone(updated));
   },
 
   async startBatch(input: { dateFrom: string; dateTo: string; maxEmails: number }): Promise<ApiResult<Batch>> {
@@ -168,13 +256,29 @@ export const api = {
   async approveDocument(documentId: string): Promise<ApiResult<InvoiceDocument>> {
     if (serverAvailable()) return callServer<InvoiceDocument>('apiApproveDocument', { documentId, requestId: requestId() });
     await delay(500);
-    const document = mock.reviewDocuments.find((item) => item.id === documentId);
+    const document = mock.reviewDocuments.find((item) => item.id === documentId) ?? mock.activeBatch?.documents.find((item) => item.id === documentId);
     if (!document) return { ok: false, error: { code: 'DOCUMENT_NOT_FOUND', message: 'No se encuentra el documento' }, requestId: requestId() };
     if (document.phase !== 'LISTO PARA APROBAR') return { ok: false, error: { code: 'DOCUMENT_NOT_READY', message: 'El documento todavía necesita revisión' }, requestId: requestId() };
     const finalized = { ...document, phase: 'FINALIZADO' as const, finalStatus: document.proposedStatus };
     mock.reviewDocuments = mock.reviewDocuments.filter((item) => item.id !== documentId);
     if (mock.activeBatch) mock.activeBatch = { ...mock.activeBatch, documents: mock.activeBatch.documents.map((item) => item.id === documentId ? finalized : item) };
     return ok(structuredClone(finalized));
+  },
+
+  async approveDocuments(documentIds: string[]): Promise<ApiResult<DocumentApprovalResult>> {
+    if (serverAvailable()) return callServer<DocumentApprovalResult>('apiApproveDocuments', { documentIds, requestId: requestId() });
+    await delay(520);
+    const items = documentIds.slice(0, 20).map((documentId) => {
+      const document = mock.reviewDocuments.find((item) => item.id === documentId) ?? mock.activeBatch?.documents.find((item) => item.id === documentId);
+      if (!document) return { documentId, ok: false, error: { code: 'DOCUMENT_NOT_FOUND', message: 'El documento ya no está disponible.' } };
+      if (document.phase !== 'LISTO PARA APROBAR') return { documentId, ok: false, error: { code: 'DOCUMENT_NOT_READY', message: 'El documento todavía tiene bloqueos.' } };
+      const finalized: InvoiceDocument = { ...document, phase: 'FINALIZADO', finalStatus: document.proposedStatus };
+      mock.reviewDocuments = mock.reviewDocuments.filter((item) => item.id !== documentId);
+      if (mock.activeBatch) mock.activeBatch = { ...mock.activeBatch, documents: mock.activeBatch.documents.map((item) => item.id === documentId ? finalized : item) };
+      const destination = document.proposedStatus === 'PROCESADA' ? `${document.invoiceDate.slice(0, 4)}/${document.invoiceDate.slice(5, 7)}/${document.originalName}` : 'Registro definitivo sin archivo';
+      return { documentId, ok: true, document: finalized, destination };
+    });
+    return ok({ items, approved: items.filter((item) => item.ok).length, failed: items.filter((item) => !item.ok).length });
   },
 
   async approveBatch(batchId: string, documentIds: string[]): Promise<ApiResult<Batch>> {

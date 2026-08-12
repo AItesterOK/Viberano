@@ -1,24 +1,39 @@
 function safeRows_(name) { try { return getRows_(name); } catch (_) { return []; } }
 
+function schemaReady_() {
+  const ss = spreadsheet_();
+  const requiredSheets = [APP.SHEETS.BATCHES, APP.SHEETS.DOCUMENTS, APP.SHEETS.MOVEMENTS, APP.SHEETS.RECONCILIATIONS, APP.SHEETS.CATEGORIES, APP.SHEETS.EXPORTS, APP.SHEETS.BANK_FORMATS, APP.SHEETS.COVERAGES, APP.SHEETS.SUPPLIER_RULES];
+  if (requiredSheets.some(function (name) { return !ss.getSheetByName(name); })) return false;
+  const providerSheet = ss.getSheetByName(APP.SHEETS.PROVIDERS);
+  if (!providerSheet) return false;
+  const providerHeaders = providerSheet.getRange(1, 1, 1, Math.max(providerSheet.getLastColumn(), 1)).getValues()[0].map(String);
+  return ['FRECUENCIA_ESPERADA', 'DIA_ESPERADO', 'MES_ANCLA', 'PERIODOS_EXCLUIDOS_JSON', 'EVIDENCIA_FRECUENCIA'].every(function (header) { return providerHeaders.indexOf(header) !== -1; });
+}
+
 function apiBootstrap() {
   return withApi_(null, function (user) {
     const config = getConfigMap_();
     const invoiceRows = safeRows_(APP.SHEETS.INVOICES);
     const allInvoices = invoiceRows.map(invoiceFromRow_);
-    const invoices = allInvoices.slice(-500).reverse();
+    const invoices = allInvoices.slice(-50).reverse();
+    const batchRows = safeRows_(APP.SHEETS.BATCHES);
+    const documentRows = safeRows_(APP.SHEETS.DOCUMENTS);
+    const movementRows = safeRows_(APP.SHEETS.MOVEMENTS);
+    const reconciliationRows = safeRows_(APP.SHEETS.RECONCILIATIONS);
     const providerRows = safeRows_(APP.SHEETS.PROVIDERS).map(providerFromRow_);
     const invoiceCounts = allInvoices.filter(function (invoice) { return invoice.status === 'PROCESADA'; }).reduce(function (map, invoice) { const key = normalizeText_(invoice.supplier); map[key] = (map[key] || 0) + 1; return map; }, {});
     providerRows.forEach(function (provider) { provider.invoiceCount = invoiceCounts[normalizeText_(provider.name)] || 0; delete provider.__row; });
     const metrics = buildMetrics_(allInvoices);
     // El LOG conserva el JSON completo en Sheets, pero el arranque solo necesita
     // un resumen acotado para no superar el límite de respuesta de google.script.run.
-    const logRows = safeRows_(APP.SHEETS.LOG).slice(-50).reverse();
-    const schemaReady = Boolean(spreadsheet_().getSheetByName(APP.SHEETS.BATCHES) && spreadsheet_().getSheetByName(APP.SHEETS.DOCUMENTS) && spreadsheet_().getSheetByName(APP.SHEETS.MOVEMENTS) && spreadsheet_().getSheetByName(APP.SHEETS.RECONCILIATIONS) && spreadsheet_().getSheetByName(APP.SHEETS.CATEGORIES) && spreadsheet_().getSheetByName(APP.SHEETS.EXPORTS) && spreadsheet_().getSheetByName(APP.SHEETS.BANK_FORMATS));
-    const reviewDocuments = schemaReady ? reviewDocuments_() : [];
+    const allLogRows = safeRows_(APP.SHEETS.LOG);
+    const logRows = allLogRows.slice(-50).reverse();
+    const schemaReady = schemaReady_();
+    const reviewDocuments = schemaReady ? reviewDocuments_(documentRows) : [];
     const triggers = projectTriggers_();
     return {
       settings: { mode: String(config.APP_MODE || 'DRY_RUN'), user: user, effectiveUser: getEffectiveEmail_(), allowedUsers: String(config.APP_ALLOWED_USERS || APP.OWNER_EMAIL).split(/[;,\s]+/).filter(Boolean), timezone: String(config.APP_TIMEZONE || APP.TIMEZONE), spreadsheetName: 'ReparaPRO Docs', invoiceFolderName: 'A.2 - FA-GASTOS', bankFolderName: 'MOVIMIENTOS BANCARIOS', maxBatchSize: Number(config.APP_MAX_BATCH_SIZE || APP.MAX_BATCH_SIZE), sliceSize: Number(config.APP_SLICE_SIZE || APP.SLICE_SIZE), startDate: effectiveStartDate_(config), services: { gmail: true, drive: true, sheets: true }, triggers: triggers || [], triggerDiagnosticAvailable: triggers !== null, schemaReady: schemaReady },
-      activeBatch: schemaReady ? getActiveBatch_() : null, reviewDocuments: reviewDocuments, invoices: invoices, suppliers: providerRows, categories: schemaReady ? categories_().map(function (item) { delete item.__row; return item; }) : [], metrics: metrics, bankImports: schemaReady ? allBankImports_().slice(0, 12) : [], bankFormats: schemaReady ? listedBankFormats_(true) : [], exports: schemaReady ? safeRows_(APP.SHEETS.EXPORTS).slice(-24).reverse().map(exportFromRow_) : [], audit: logRows.map(function (row) { return { id: String(row.ID_EVENTO || ('legacy-log-' + row.__row)), timestamp: String(row.FECHA_HORA || ''), level: String(row.NIVEL || 'INFO'), action: String(row['ACCIÓN'] || ''), object: String(row.DOCUMENTO || ''), detail: String(row.DETALLE || '').slice(0, 1000), user: String(row.USUARIO || 'sistema'), batchId: String(row.LOTE_ID || '') || undefined }; }), reviewCount: reviewDocuments.length, processedCount: allInvoices.filter(function (item) { return item.status === 'PROCESADA'; }).length, duplicateCount: allInvoices.filter(function (item) { return item.status === 'DUPLICADO IGNORADO'; }).length,
+      activeBatch: schemaReady ? getActiveBatch_(batchRows, documentRows) : null, reviewDocuments: reviewDocuments, invoices: invoices, suppliers: providerRows, categories: schemaReady ? categories_().map(function (item) { delete item.__row; return item; }) : [], metrics: metrics, bankImports: schemaReady ? allBankImports_(movementRows, reconciliationRows).slice(0, 12) : [], bankFormats: schemaReady ? listedBankFormats_(true) : [], exports: schemaReady ? safeRows_(APP.SHEETS.EXPORTS).slice(-24).reverse().map(exportFromRow_) : [], audit: logRows.map(auditFromRow_), reviewCount: reviewDocuments.length, processedCount: allInvoices.filter(function (item) { return item.status === 'PROCESADA'; }).length, duplicateCount: allInvoices.filter(function (item) { return item.status === 'DUPLICADO IGNORADO'; }).length, invoiceWindow: { returned: invoices.length, total: allInvoices.length, complete: invoices.length === allInvoices.length }, auditWindow: { returned: logRows.length, total: allLogRows.length, complete: logRows.length === allLogRows.length },
     };
   });
 }
@@ -30,6 +45,7 @@ function apiCancelBatch(payload) { return withApi_(payload, function (user, requ
 function apiSaveDocumentReview(payload) { return withApi_(payload, function (user, requestId) { return saveDocumentReview_(payload, user, requestId); }, { lock: true }); }
 function apiSaveDocumentReviews(payload) { return withApi_(payload, function (user, requestId) { return saveDocumentReviews_(payload, user, requestId); }, { lock: true }); }
 function apiApproveDocument(payload) { return withApi_(payload, function (user, requestId) { return approveDocument_(payload.documentId, user, requestId); }, { lock: true }); }
+function apiApproveDocuments(payload) { return withApi_(payload, function (user, requestId) { return approveDocuments_(payload || {}, user, requestId); }, { lock: true }); }
 function apiApproveBatch(payload) { return withApi_(payload, function (user, requestId) { return approveBatch_(payload, user, requestId); }, { lock: true }); }
 function apiRetryBatch(payload) { return withApi_(payload, function (user, requestId) { return retryBatch_(payload.batchId, user, requestId); }, { lock: true }); }
 function apiPreviewBankImport(payload) { return withApi_(payload, function (user, requestId) { return previewBankImport_(payload, user, requestId); }, { lock: true }); }
@@ -43,9 +59,32 @@ function apiSaveReconciliationException(payload) { return withApi_(payload, func
 function apiSaveCategory(payload) { return withApi_(payload, function (user, requestId) { return saveCategory_(payload, user, requestId); }, { lock: true }); }
 function apiGetMonthlyClose(payload) { return withApi_(payload, function () { return buildMonthlyClose_(payload.period); }); }
 function apiCreateAccountantExport(payload) { return withApi_(payload, function (user, requestId) { return createAccountantExport_(payload, user, requestId); }, { lock: true }); }
-function apiListInvoices(payload) { return withApi_(payload, function () { const limit = Math.min(Math.max(Number(payload && payload.limit || 100), 1), 500); const offset = Math.max(Number(payload && payload.offset || 0), 0); const rows = safeRows_(APP.SHEETS.INVOICES).map(invoiceFromRow_).reverse(); return { items: rows.slice(offset, offset + limit), nextOffset: offset + limit < rows.length ? offset + limit : null, total: rows.length }; }); }
+function apiListInvoices(payload) { return withApi_(payload, function () {
+  payload = payload || {};
+  const limit = Math.min(Math.max(Number(payload.limit || 50), 1), 200);
+  const offset = Math.max(Number(payload.cursor === undefined ? payload.offset || 0 : payload.cursor), 0);
+  const filters = payload.filters || {};
+  const query = normalizeText_(filters.query || '');
+  const rows = safeRows_(APP.SHEETS.INVOICES).map(invoiceFromRow_).reverse().filter(function (invoice) {
+    if (filters.status && invoice.status !== String(filters.status)) return false;
+    if (filters.supplier && normalizeText_(invoice.supplier) !== normalizeText_(filters.supplier)) return false;
+    if (filters.period && invoice.date.slice(0, 7) !== String(filters.period)) return false;
+    if (query && normalizeText_([invoice.supplier, invoice.number, invoice.taxId, invoice.originalName].join(' ')).indexOf(query) === -1) return false;
+    return true;
+  });
+  const next = offset + limit < rows.length ? offset + limit : null;
+  return { items: rows.slice(offset, offset + limit), nextOffset: next, nextCursor: next === null ? undefined : String(next), total: rows.length };
+}); }
 function apiListBankImports(payload) { return withApi_(payload, function () { const limit = Math.min(Math.max(Number(payload && payload.limit || 12), 1), 50); const offset = Math.max(Number(payload && payload.offset || 0), 0); const rows = allBankImports_(); return { items: rows.slice(offset, offset + limit), nextOffset: offset + limit < rows.length ? offset + limit : null, total: rows.length }; }); }
 function apiListBankFormats(payload) { return withApi_(payload, function () { return listedBankFormats_(!payload || payload.activeOnly !== false); }); }
+function apiGetWeeklyWorkbench(payload) { return withApi_(payload, function () { return buildWeeklyWorkbench_(payload || {}); }); }
+function apiGetCoverageMap(payload) { return withApi_(payload, function () { return buildCoverageMap_(payload || {}); }); }
+function apiListReconciliationCandidates(payload) { return withApi_(payload, function () { return listReconciliationCandidates_(payload || {}); }); }
+function apiSaveReconciliationDecisions(payload) { return withApi_(payload, function (user, requestId) { return saveReconciliationDecisions_(payload || {}, user, requestId); }, { lock: true }); }
+function apiListSupplierRules(payload) { return withApi_(payload, function () { return listSupplierRules_(payload || {}); }); }
+function apiSaveSupplierRule(payload) { return withApi_(payload, function (user, requestId) { return saveSupplierRule_(payload || {}, user, requestId); }, { lock: true }); }
+function apiDeactivateSupplierRule(payload) { return withApi_(payload, function (user, requestId) { return deactivateSupplierRule_(payload || {}, user, requestId); }, { lock: true }); }
+function apiSaveSupplierSchedule(payload) { return withApi_(payload, function (user, requestId) { return saveSupplierSchedule_(payload || {}, user, requestId); }, { lock: true }); }
 
 function apiGetDiagnostics() { return withApi_(null, function () { const triggers = projectTriggers_(); return { triggers: triggers || [], triggerDiagnosticAvailable: triggers !== null, mode: String(getConfigMap_().APP_MODE || 'DRY_RUN'), version: APP.VERSION }; }); }
 function apiDisableLegacyTriggers(payload) { return withApi_(payload, function (user, requestId) { return disableLegacyTriggers_(payload, user, requestId); }, { lock: true }); }
@@ -76,7 +115,16 @@ function apiGetDocumentPreview(payload) {
   });
 }
 function apiGetMetrics() { return withApi_(null, function () { return buildMetrics_(safeRows_(APP.SHEETS.INVOICES).map(invoiceFromRow_)); }); }
-function apiListAudit(payload) { return withApi_(payload, function () { const limit = Math.min(Math.max(Number(payload && payload.limit || 100), 1), 500); const offset = Math.max(Number(payload && payload.offset || 0), 0); const rows = safeRows_(APP.SHEETS.LOG).slice().reverse(); return { items: rows.slice(offset, offset + limit), nextOffset: offset + limit < rows.length ? offset + limit : null, total: rows.length }; }); }
+function auditFromRow_(row) { return { id: String(row.ID_EVENTO || ('legacy-log-' + row.__row)), timestamp: String(row.FECHA_HORA || ''), level: String(row.NIVEL || 'INFO'), action: String(row['ACCIÓN'] || ''), object: String(row.DOCUMENTO || ''), detail: String(row.DETALLE || '').slice(0, 1000), user: String(row.USUARIO || 'sistema'), batchId: String(row.LOTE_ID || '') || undefined }; }
+function apiListAudit(payload) { return withApi_(payload, function () {
+  payload = payload || {};
+  const limit = Math.min(Math.max(Number(payload.limit || 50), 1), 200);
+  const offset = Math.max(Number(payload.cursor === undefined ? payload.offset || 0 : payload.cursor), 0);
+  const query = normalizeText_(payload.query || '');
+  const rows = safeRows_(APP.SHEETS.LOG).slice().reverse().filter(function (row) { return !query || normalizeText_([row['ACCIÓN'], row.DOCUMENTO, row.DETALLE, row.USUARIO, row.LOTE_ID].join(' ')).indexOf(query) !== -1; });
+  const next = offset + limit < rows.length ? offset + limit : null;
+  return { items: rows.slice(offset, offset + limit).map(auditFromRow_), nextOffset: next, nextCursor: next === null ? undefined : String(next), total: rows.length };
+}); }
 function apiExportSuppliers() { return withApi_(null, function () { return safeRows_(APP.SHEETS.PROVIDERS).map(function (row) { return { PROVEEDOR: String(row.PROVEEDOR || ''), DOMINIO: String(row.DOMINIO || ''), CIF_NIF: String(row.CIF_NIF || '') }; }); }); }
 
 function apiSaveSupplier(payload) {

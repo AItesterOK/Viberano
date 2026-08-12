@@ -242,3 +242,80 @@ test('confirma y deshace una asignación desde la matriz avanzada', async ({ pag
   await expect(page.getByText('Relación confirmada y saldos recalculados.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Deshacer' })).toBeVisible();
 });
+
+test('organiza la semana en cuatro pasos y separa la cobertura de Gmail y bancos', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Qué necesita atención hoy' })).toBeVisible();
+  const workflow = page.getByRole('navigation', { name: 'Flujo semanal' });
+  await expect(workflow.getByRole('button', { name: /Capturar/ })).toBeVisible();
+  await expect(workflow.getByRole('button', { name: /Validar/ })).toBeVisible();
+  await expect(workflow.getByRole('button', { name: /Conciliar/ })).toBeVisible();
+  await expect(workflow.getByRole('button', { name: /Cerrar/ })).toBeVisible();
+  await expect(page.getByText('Siguiente acción recomendada')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Correos sin analizar/ })).toBeVisible();
+  const coverage = page.locator('.coverage-panel');
+  await expect(coverage.getByText('Gmail', { exact: true })).toBeVisible();
+  await expect(coverage.getByText('CaixaBank', { exact: true })).toBeVisible();
+  await expect(coverage.getByText('Santander', { exact: true })).toBeVisible();
+  await expect(coverage.getByRole('button', { name: /Gmail: CON HUECOS/ })).toBeVisible();
+  await expect(coverage.getByRole('button', { name: /Gmail: COMPLETA/ })).toBeVisible();
+  const resume = page.getByRole('button', { name: /Continuar Gmail desde 10 feb 2026/ });
+  await expect(resume).toBeVisible();
+  await resume.click();
+  await expect(page.getByLabel('Desde')).toHaveValue('2026-02-10');
+  await expect(page.getByText(/El formulario usa este cursor para evitar volver a enero/)).toBeVisible();
+});
+
+test('guarda una revisión y abre el siguiente documento', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Revisión/ }).first().click();
+  await page.getByRole('button', { name: /factura-demo-revision\.pdf/ }).click();
+  await page.getByLabel('Número de factura').fill('DEMO-SIGUIENTE-01');
+  await page.getByRole('button', { name: 'Guardar y abrir siguiente' }).click();
+  await expect(page.getByRole('heading', { name: 'factura-demo-lista.pdf' })).toBeVisible();
+  await expect(page.getByText(/1 guardadas/)).toBeVisible();
+});
+
+test('permite seleccionar y aprobar documentos listos como conjunto', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Revisión/ }).first().click();
+  await page.getByLabel('Seleccionar factura-demo-lista.pdf para aprobar').check();
+  await page.getByRole('button', { name: 'Aprobar seleccionadas (1)' }).click();
+  const approvalDialog = page.getByRole('dialog', { name: 'Confirmar aprobación conjunta' });
+  await expect(approvalDialog.getByText(/A.2 - FA-GASTOS/)).toBeVisible();
+  await approvalDialog.getByRole('button', { name: 'Aprobar 1 documentos' }).click();
+  await expect(page.getByText('1 documentos aprobados.')).toBeVisible();
+  await expect(page.getByLabel('Seleccionar factura-demo-lista.pdf para aprobar')).toHaveCount(0);
+});
+
+test('decide propuestas inequívocas desde la bandeja visual de conciliación', async ({ page }) => {
+  await page.goto('/');
+  if ((page.viewportSize()?.width ?? 1200) < 860) {
+    await page.getByRole('button', { name: /Más/ }).click();
+    await page.getByRole('button', { name: 'Conciliación' }).last().click();
+  } else await page.getByRole('button', { name: 'Conciliación' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Bandeja de propuestas' })).toBeVisible();
+  await page.getByLabel('Seleccionar todas las propuestas inequívocas').check();
+  await page.getByRole('button', { name: 'Confirmar seleccionadas (2)' }).click();
+  await expect(page.getByText('2 decisiones guardadas.')).toBeVisible();
+  await page.getByRole('tab', { name: /Casos complejos/ }).click();
+  await expect(page.getByText('SIN COINCIDENCIA EN ESTA COBERTURA').first()).toBeVisible();
+  await expect(page.getByText(/impagada/i)).toHaveCount(0);
+});
+
+test('consulta reglas y confirma una frecuencia de proveedor sin automatizar decisiones', async ({ page }) => {
+  await page.goto('/');
+  if ((page.viewportSize()?.width ?? 1200) < 860) {
+    await page.getByRole('button', { name: /Más/ }).click();
+    await page.getByRole('button', { name: 'Proveedores' }).last().click();
+  } else await page.getByRole('button', { name: 'Proveedores' }).first().click();
+  const supplier = page.locator('.supplier-grid article').filter({ hasText: 'Componentes Demo Europa BV' });
+  await supplier.getByRole('button', { name: 'Reglas y frecuencia' }).click();
+  const dialog = page.getByRole('dialog', { name: /Reglas y frecuencia · Componentes Demo Europa BV/ });
+  await expect(dialog.getByText('CONCEPTO BANCARIO', { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/nunca crean proveedores, aprueban ni concilian/)).toBeVisible();
+  await dialog.getByLabel('Frecuencia', { exact: true }).selectOption('MONTHLY');
+  await dialog.getByLabel('Evidencia de frecuencia').fill('Confirmada manualmente por el histórico sintético de cinco facturas.');
+  await dialog.getByRole('button', { name: 'Guardar frecuencia' }).click();
+  await expect(dialog.getByText(/La agenda hará sugerencias/)).toBeVisible();
+});

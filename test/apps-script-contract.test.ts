@@ -51,7 +51,7 @@ describe('contrato de seguridad de Apps Script', () => {
 
   it('no califica como impagada una ausencia de conciliación', () => {
     const allServerSource = fs.readdirSync(root).filter((name) => name.endsWith('.js')).map(source).join('\n');
-    expect(allServerSource.toUpperCase()).not.toContain('IMPAGADA');
+    expect(allServerSource.toUpperCase()).not.toContain('IMPAGAD');
   });
 
   it('conserva cursor por mensaje y una cola de revisión recuperable', () => {
@@ -101,7 +101,7 @@ describe('contrato de seguridad de Apps Script', () => {
 
   it('acota el historial enviado durante el arranque', () => {
     const api = source('Api.js');
-    expect(api).toContain("safeRows_(APP.SHEETS.LOG).slice(-50).reverse()");
+    expect(api).toContain("allLogRows.slice(-50).reverse()");
     expect(api).toContain("detail: String(row.DETALLE || '').slice(0, 1000)");
   });
 
@@ -271,7 +271,7 @@ describe('contrato de seguridad de Apps Script', () => {
     const config = source('Config.js');
     const invoice = source('InvoiceService.js');
     const data = source('Data.js');
-    expect(config).toContain("VERSION: '1.8.4'");
+    expect(config).toContain("VERSION: '1.9.0'");
     expect(config).toContain("'PROVEEDOR_NO_HABITUAL'");
     expect(invoice).toContain('processedSupplierInvoiceCount_');
     expect(invoice).toContain('providerHistory >= 3');
@@ -325,7 +325,54 @@ describe('contrato de seguridad de Apps Script', () => {
     expect(api).toContain('function apiListInvoices');
     expect(api).toContain('function apiListBankImports');
     expect(api).toContain('function apiListAudit');
-    expect(api).toContain('nextOffset: offset + limit < rows.length ? offset + limit : null');
-    expect(api).toContain('allInvoices.slice(-500).reverse()');
+    expect(api).toContain('nextCursor: next === null ? undefined : String(next)');
+    expect(api).toContain('allInvoices.slice(-50).reverse()');
+    expect(api).toContain('invoiceWindow: { returned: invoices.length, total: allInvoices.length');
+    expect(api).toContain('auditWindow: { returned: logRows.length, total: allLogRows.length');
+  });
+
+  it('migra de forma aditiva la cobertura y las reglas de proveedor de la versión 1.9', () => {
+    const config = source('Config.js');
+    const api = source('Api.js');
+    expect(config).toContain("COVERAGES: 'COBERTURAS'");
+    expect(config).toContain("SUPPLIER_RULES: 'REGLAS_PROVEEDOR'");
+    expect(config).toContain("'FRECUENCIA_ESPERADA'");
+    expect(config).toContain("'PERIODOS_EXCLUIDOS_JSON'");
+    expect(api).toContain('function schemaReady_');
+    expect(api).toContain('APP.SHEETS.COVERAGES');
+    expect(api).toContain('APP.SHEETS.SUPPLIER_RULES');
+  });
+
+  it('publica las APIs de mesa semanal, cobertura, conciliación guiada y reglas', () => {
+    const api = source('Api.js');
+    ['apiGetWeeklyWorkbench', 'apiGetCoverageMap', 'apiListReconciliationCandidates', 'apiSaveReconciliationDecisions', 'apiListSupplierRules', 'apiSaveSupplierRule', 'apiDeactivateSupplierRule', 'apiSaveSupplierSchedule'].forEach((name) => expect(api).toContain(`function ${name}`));
+    expect(api).toContain('apiSaveReconciliationDecisions(payload)');
+    expect(api).toContain('saveReconciliationDecisions_(payload || {}, user, requestId); }, { lock: true }');
+  });
+
+  it('aprueba hasta veinte documentos en una llamada y bajo un solo bloqueo', () => {
+    const api = source('Api.js');
+    const invoice = source('InvoiceService.js');
+    expect(api).toContain('function apiApproveDocuments');
+    expect(api).toContain('approveDocuments_(payload || {}, user, requestId); }, { lock: true }');
+    expect(invoice).toContain('function approveDocuments_');
+    expect(invoice).toContain("eventByRequest_(requestId, 'DOCUMENTOS_APROBADOS_EN_CONJUNTO')");
+    expect(invoice).toContain('.slice(0, 20)');
+    expect(invoice).toContain('approved: results.filter');
+  });
+
+  it('las reglas aprendidas solo proponen y conservan su historial al desactivarse', () => {
+    const workbench = source('WorkbenchService.js');
+    const gmail = source('GmailService.js');
+    expect(workbench).toContain('function applySupplierRules_');
+    expect(workbench).toContain("rule.type === 'BANK_CONCEPT'");
+    expect(workbench).toContain("rule.type === 'EMAIL_DOMAIN'");
+    expect(workbench).toContain("rule.type === 'SENDER_EMAIL'");
+    expect(workbench).toContain("rule.type === 'DEFAULT_CATEGORY'");
+    expect(workbench).toContain("rule.type === 'DEFAULT_CURRENCY'");
+    expect(workbench).toContain("effect: 'PROPOSAL_ONLY'");
+    expect(workbench).toContain('payload.activeOnly === true');
+    expect(gmail).toContain('applySupplierRules_(');
+    expect(gmail).toContain('requiere aprobación humana');
   });
 });
