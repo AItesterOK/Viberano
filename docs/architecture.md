@@ -44,11 +44,19 @@ Las pestañas históricas conservan su orden original. Las columnas nuevas se a�
 - `FACTURAS`: resultado definitivo y enlaces.
 - `MOVIMIENTOS`: importación bancaria normalizada y su archivo fuente.
 - `CONCILIACIONES`: propuestas y decisiones humanas.
+- `COBERTURAS`: intervalos acreditados por fuente, manteniendo huecos y parciales.
+- `REGLAS_PROVEEDOR`: reglas y frecuencias confirmadas que únicamente generan sugerencias.
 - `LOG`: eventos inmutables con usuario, lote y request ID.
 
 ## Conciliación
 
-El parser localiza encabezados conocidos incluso si empiezan después de varias filas —como el extracto real, cuyo encabezado comienza en la fila 9—. Para ser candidato, importe y moneda deben coincidir con tolerancia `0,01`; fecha, proveedor y concepto aportan evidencia adicional. Varias candidatas quedan en revisión.
+El parser localiza encabezados conocidos incluso si empiezan después de varias filas —como el extracto real, cuyo encabezado comienza en la fila 9—. Las propuestas comparan importe, moneda, fecha, proveedor, concepto y referencia, y explican su confianza. Varias candidatas, pagos parciales y relaciones múltiples permanecen bajo decisión humana. La bandeja permite decidir propuestas inequívocas en conjunto y la matriz avanzada conserva la asignación detallada y la posibilidad de deshacer.
+
+## Mesa semanal
+
+La pantalla inicial consume un resumen calculado, no una copia de los registros. Ordena la siguiente acción y las tareas de captura, validación, conciliación y cierre. El mapa de cobertura combina únicamente intervalos acreditados por lotes e importaciones confirmadas; no convierte una fecha máxima en cobertura continua.
+
+Las listas de facturas, movimientos, proveedores e historial se consultan por páginas para evitar que el arranque crezca con todo el histórico. Las mutaciones masivas aceptan como máximo veinte decisiones, utilizan un único bloqueo y devuelven un resultado por elemento.
 
 ## Construcción
 

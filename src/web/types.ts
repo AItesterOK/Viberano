@@ -32,6 +32,8 @@ export type ReconciliationStatus =
   | 'COINCIDENCIA CONFIRMADA'
   | 'CANDIDATA PENDIENTE'
   | 'NO ENCONTRADA EN ESTE EXTRACTO'
+  | 'SIN COINCIDENCIA EN ESTA COBERTURA'
+  | 'PAGO NO CONFIRMADO'
   | 'MOVIMIENTO SIN FACTURA'
   | 'EXCLUIDO: INGRESO'
   | 'EXCLUIDO: TRASPASO'
@@ -165,6 +167,176 @@ export interface Supplier {
   updatedAt: string;
   updatedBy: string;
   invoiceCount: number;
+  recurrent?: boolean;
+  frequency?: SupplierFrequency;
+  schedule?: SupplierSchedule;
+  defaultCategoryId?: string;
+  usualCurrency?: string;
+}
+
+export interface DocumentApprovalResult {
+  items: { documentId: string; ok: boolean; document?: InvoiceDocument; destination?: string; error?: { code: string; message: string } }[];
+  approved: number;
+  failed: number;
+}
+
+export type SupplierFrequency = 'NONE' | 'MONTHLY' | 'QUARTERLY' | 'ANNUAL';
+export type WorkbenchStepId = 'CAPTURE' | 'VALIDATE' | 'RECONCILE' | 'CLOSE';
+export type AppRoute = 'process' | 'review' | 'invoices' | 'suppliers' | 'bank' | 'close';
+
+export interface WeeklyTask {
+  id: string;
+  step: WorkbenchStepId;
+  priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  title: string;
+  detail: string;
+  count: number;
+  route: AppRoute;
+  actionLabel: string;
+  entityId?: string;
+}
+
+export interface WeeklyWorkbenchStep {
+  id: WorkbenchStepId;
+  label: string;
+  count: number;
+  status: 'READY' | 'BLOCKED' | 'DONE';
+  route: AppRoute;
+}
+
+export interface WeeklyWorkbenchCounters {
+  emailsPendingAnalysis: number;
+  invalidInvoices: number;
+  unidentifiedSuppliers: number;
+  pendingReconciliations: number;
+  movementsWithoutInvoice: number;
+  monthlyCloseBlockers: number;
+}
+
+export interface ExpectedDocument {
+  id: string;
+  supplierId: string;
+  supplierName: string;
+  frequency: SupplierFrequency;
+  expectedDate: string;
+  dueDate?: string;
+  status: 'EXPECTED' | 'RECEIVED' | 'SKIPPED';
+  detail: string;
+}
+
+export interface WeeklyWorkbench {
+  weekStart: string;
+  weekEnd: string;
+  generatedAt: string;
+  nextAction: WeeklyTask | null;
+  steps: WeeklyWorkbenchStep[];
+  counters: WeeklyWorkbenchCounters;
+  tasks: WeeklyTask[];
+  expectedDocuments: ExpectedDocument[];
+}
+
+export type CoverageStatus = 'COMPLETA' | 'PARCIAL' | 'SIN REVISAR' | 'CON HUECOS';
+
+export interface CoverageSegment {
+  id: string;
+  sourceId: string;
+  sourceType: 'GMAIL' | 'BANK';
+  sourceName: string;
+  from: string;
+  to: string;
+  status: CoverageStatus;
+  detail: string;
+  batchIds?: string[];
+  importId?: string;
+  movementCount?: number;
+  route: 'process' | 'bank';
+}
+
+export interface CoverageLane {
+  id: string;
+  type: 'GMAIL' | 'BANK';
+  name: string;
+  segments: CoverageSegment[];
+}
+
+export interface CoverageMap {
+  from: string;
+  to: string;
+  lanes: CoverageLane[];
+  nextGmailCursor: { date: string; batchId?: string; pendingMessages: number; label: string } | null;
+  warnings: string[];
+}
+
+export type ReconciliationConfidence = 'ALTA' | 'MEDIA' | 'BAJA';
+export type ReconciliationCandidateStatus = 'PENDING' | 'COMPLEX' | 'CONFIRMED' | 'EXCLUDED';
+
+export interface ReconciliationEvidence {
+  kind: string;
+  label: string;
+  detail: string;
+  matched: boolean;
+}
+
+export interface ReconciliationCandidate {
+  id: string;
+  importId: string;
+  status: ReconciliationCandidateStatus;
+  confidence: ReconciliationConfidence;
+  safeStatusLabel: string;
+  movement: BankMovement;
+  invoice: InvoiceRecord | null;
+  evidence: ReconciliationEvidence[];
+  difference: number;
+  assignedAmount: number;
+  canBulkDecide: boolean;
+  reconciliationId?: string;
+}
+
+export interface ReconciliationCandidatePage {
+  items: ReconciliationCandidate[];
+  total: number;
+  nextCursor?: string;
+}
+
+export interface ReconciliationDecisionItem {
+  candidateId?: string;
+  movementId: string;
+  invoiceId?: string;
+  decision: 'CONFIRM' | 'REJECT';
+  allocatedAmount?: number;
+  reason?: string;
+  evidence?: string;
+}
+
+export interface ReconciliationDecisionResult {
+  results: { movementId: string; invoiceId?: string; status: 'SAVED' | 'ERROR'; decision: 'CONFIRM' | 'REJECT'; error?: string }[];
+  saved: number;
+  failed: number;
+}
+
+export type SupplierRuleType = 'EMAIL_DOMAIN' | 'SENDER_EMAIL' | 'BANK_CONCEPT' | 'DEFAULT_CATEGORY' | 'DEFAULT_CURRENCY';
+
+export interface SupplierRule {
+  id: string;
+  supplierId: string;
+  type: SupplierRuleType;
+  pattern: string;
+  value: string;
+  active: boolean;
+  evidence: string;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface SupplierSchedule {
+  supplierId: string;
+  frequency: SupplierFrequency;
+  expectedDay?: number;
+  anchorMonth?: number;
+  excludedPeriods: string[];
+  evidence: string;
 }
 
 export interface InvoiceRecord {
@@ -216,6 +388,50 @@ export interface BankMovement {
   difference?: number;
 }
 
+export type BankCurrencyMode = 'COLUMN' | 'EMBEDDED' | 'FIXED';
+
+export interface BankMapping {
+  operationDate?: number;
+  valueDate?: number;
+  concept?: number;
+  amount?: number;
+  currency?: number;
+  reference?: number;
+  headerRow: number;
+  currencyMode: BankCurrencyMode;
+  fixedCurrency?: string;
+  rememberProfile?: boolean;
+  profileName?: string;
+}
+
+export interface BankFormat {
+  id: string;
+  name: string;
+  source: string;
+  extension: string;
+  separator: string;
+  headerSignature: string;
+  headerRow: number;
+  mapping: Omit<BankMapping, 'headerRow' | 'currencyMode' | 'fixedCurrency' | 'rememberProfile' | 'profileName'>;
+  currencyMode: BankCurrencyMode;
+  fixedCurrency: string;
+  active: boolean;
+  native: boolean;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface BankMappingRequiredDetails {
+  headers: string[];
+  headerRow: number;
+  headerSignature: string;
+  extension: string;
+  separator: string;
+  suggestedCurrencyMode: BankCurrencyMode;
+}
+
 export interface ReconciliationLink {
   id: string;
   importId: string;
@@ -244,6 +460,8 @@ export interface BankImport {
   detectedPeriodFrom?: string;
   detectedPeriodTo?: string;
   warnings?: string[];
+  bankFormatId?: string;
+  bankFormatName?: string;
   driveUrl?: string;
   createdAt: string;
   createdBy: string;
@@ -292,6 +510,19 @@ export interface AuditEvent {
   batchId?: string;
 }
 
+export interface PagedResult<T> {
+  items: T[];
+  total: number;
+  nextCursor?: string;
+  nextOffset?: number | null;
+}
+
+export interface SnapshotWindow {
+  returned: number;
+  total: number;
+  complete: boolean;
+}
+
 export interface AppSettings {
   mode: 'DRY_RUN' | 'PRODUCTION';
   user: string;
@@ -319,11 +550,19 @@ export interface AppSnapshot {
   categories: ExpenseCategory[];
   metrics: MonthlyMetric[];
   bankImports: BankImport[];
+  bankFormats: BankFormat[];
   audit: AuditEvent[];
   reviewCount: number;
   processedCount: number;
   duplicateCount: number;
+  invoiceWindow?: SnapshotWindow;
+  auditWindow?: SnapshotWindow;
   exports?: AccountantExport[];
+  weeklyWorkbench?: WeeklyWorkbench;
+  coverageMap?: CoverageMap;
+  reconciliationCandidates?: ReconciliationCandidate[];
+  supplierRules?: SupplierRule[];
+  supplierSchedules?: SupplierSchedule[];
 }
 
 export interface ApiResult<T> {

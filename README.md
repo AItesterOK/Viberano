@@ -8,11 +8,14 @@ Aplicación web interna para localizar, revisar, archivar y conciliar facturas d
 - OCR gratuito mediante Google Drive y reglas conservadoras;
 - aprobación humana antes de archivar en Drive o registrar en `FACTURAS`;
 - revisión manual, catálogo de proveedores y exportación CSV;
+- mesa semanal con siguiente acción, vencimientos y mapa de cobertura por fuente;
 - métricas mensuales y medias diferenciando meses completos;
-- importación XLSX/CSV y conciliación bancaria auditable;
+- importación XLSX/CSV, soporte nativo para CaixaBank y perfiles de mapeo bancario reutilizables;
+- bandeja de propuestas de conciliación y matriz para pagos parciales o relaciones múltiples;
+- reglas de proveedor auditadas que sugieren categoría, moneda y conceptos bancarios sin aprobar automáticamente;
 - registro de usuario, evento, evidencia y cambios anteriores/nuevos.
 
-La aplicación funciona online. No contabiliza, no paga, no usa Document AI, no modifica correos y no confirma conciliaciones múltiples.
+La aplicación funciona online. No contabiliza, no paga, no usa Document AI, no modifica correos y nunca aplica por sí sola una clasificación o conciliación propuesta.
 
 ## Desarrollo local
 
@@ -50,7 +53,7 @@ El primer acceso muestra la migración pendiente. La acción **Crear copia y mig
 
 1. crea una copia independiente de `ReparaPRO Docs`;
 2. añade columnas al final de las pestañas existentes;
-3. crea `LOTES`, `DOCUMENTOS`, `MOVIMIENTOS` y `CONCILIACIONES`;
+3. crea las pestañas aditivas de lotes, documentos, movimientos, conciliaciones, formatos bancarios, coberturas y reglas de proveedor;
 4. mantiene `APP_MODE=DRY_RUN`.
 
 No cambies a `PRODUCTION` hasta revisar el piloto de 10 correos. Consulta [docs/operations.md](docs/operations.md).

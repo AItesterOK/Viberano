@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AppSnapshot, BankImport, DocumentPreview, ExpenseCategory, InvoiceDocument, InvoiceRecord, MonthlyClose, ReconciliationLink, ReviewDraft, Supplier, TaxLine } from './types';
+import type { AppSnapshot, BankImport, BankMapping, BankMappingRequiredDetails, CoverageMap, DocumentPreview, ExpenseCategory, InvoiceDocument, InvoiceRecord, MonthlyClose, ReconciliationCandidate, ReconciliationCandidateStatus, ReconciliationDecisionItem, ReconciliationLink, ReviewDraft, Supplier, SupplierFrequency, SupplierRule, SupplierRuleType, SupplierSchedule, TaxLine, WeeklyWorkbench } from './types';
 import { api } from './lib/api';
 import { csvEscape, formatInvoiceFileName, invoiceArchivePath, metricsAverages, normalizeText } from './lib/domain';
 import { Icon, type IconName } from './components/Icon';
 import { Button, EmptyState, EvidenceChain, Field, Modal, SectionHeader, StatusBadge, formatCurrency, formatDate } from './components/UI';
 
 type Page = 'home' | 'process' | 'review' | 'invoices' | 'suppliers' | 'bank' | 'close' | 'metrics' | 'history' | 'settings';
+type NavigationFocus = { entityId?: string; batchId?: string; importId?: string; supplierId?: string; period?: string };
+const navigationFocusKey = 'reparapro:navigation-focus';
+
+function readNavigationFocus(page: Page): NavigationFocus | null {
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(navigationFocusKey) || 'null') as { page: Page; focus: NavigationFocus } | null;
+    return stored?.page === page ? stored.focus : null;
+  } catch (_) { return null; }
+}
 
 const navItems: { id: Page; label: string; icon: IconName; mobile?: boolean }[] = [
   { id: 'home', label: 'Inicio', icon: 'home', mobile: true },
@@ -40,7 +49,12 @@ export function App() {
   if (!snapshot || error) return <ErrorScreen message={error} retry={refresh} />;
 
   const updateSnapshot = (update: Partial<AppSnapshot>) => setSnapshot((current) => current ? { ...current, ...update } : current);
-  const pageProps = { snapshot, updateSnapshot, navigate: setPage };
+  const navigate = (nextPage: Page, focus?: NavigationFocus) => {
+    if (focus) sessionStorage.setItem(navigationFocusKey, JSON.stringify({ page: nextPage, focus }));
+    else sessionStorage.removeItem(navigationFocusKey);
+    setPage(nextPage);
+  };
+  const pageProps = { snapshot, updateSnapshot, navigate };
   const content = {
     home: <HomePage {...pageProps} />,
     process: <ProcessingPage {...pageProps} />,
@@ -58,47 +72,107 @@ export function App() {
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><img src="/reparapro-logo.jpg" alt="ReparaPRO · iPhone · Mac · iPad"/><span>Gastos</span></div>
-      <nav aria-label="Navegación principal">{navItems.map((item) => <button key={item.id} className={page === item.id ? 'is-active' : ''} onClick={() => setPage(item.id)}><Icon name={item.icon}/><span>{item.label}</span>{item.id === 'review' && snapshot.reviewCount > 0 && <b>{snapshot.reviewCount}</b>}</button>)}</nav>
+      <nav aria-label="Navegación principal">{navItems.map((item) => <button key={item.id} aria-current={page === item.id ? 'page' : undefined} className={page === item.id ? 'is-active' : ''} onClick={() => setPage(item.id)}><Icon name={item.icon}/><span>{item.label}</span>{item.id === 'review' && snapshot.reviewCount > 0 && <b>{snapshot.reviewCount}</b>}</button>)}</nav>
       <div className="sidebar__footer"><span className={`mode-dot ${snapshot.settings.mode === 'DRY_RUN' ? 'is-dry' : ''}`}/><div><strong>{snapshot.settings.mode === 'DRY_RUN' ? 'Modo seco' : 'Producción'}</strong><small>{snapshot.settings.user}</small></div></div>
     </aside>
     <main className="main-content">{content}</main>
     <nav className="mobile-nav" aria-label="Navegación móvil">
-      {navItems.filter((item) => item.mobile).map((item) => <button key={item.id} className={page === item.id ? 'is-active' : ''} onClick={() => { setPage(item.id); setMobileMore(false); }}><Icon name={item.icon}/><span>{item.label === 'Procesamiento' ? 'Procesar' : item.label}</span></button>)}
-      <button className={extraItems.some((item) => item.id === page) ? 'is-active' : ''} onClick={() => setMobileMore((value) => !value)}><Icon name="menu"/><span>Más</span></button>
-      {mobileMore && <div className="mobile-more">{extraItems.map((item) => <button key={item.id} onClick={() => { setPage(item.id); setMobileMore(false); }}><Icon name={item.icon}/>{item.label}</button>)}</div>}
+      {navItems.filter((item) => item.mobile).map((item) => <button key={item.id} aria-current={page === item.id ? 'page' : undefined} className={page === item.id ? 'is-active' : ''} onClick={() => { setPage(item.id); setMobileMore(false); }}><Icon name={item.icon}/><span>{item.label === 'Procesamiento' ? 'Procesar' : item.label}</span></button>)}
+      <button aria-expanded={mobileMore} aria-controls="mobile-more-menu" className={extraItems.some((item) => item.id === page) ? 'is-active' : ''} onClick={() => setMobileMore((value) => !value)}><Icon name="menu"/><span>Más</span></button>
+      {mobileMore && <div className="mobile-more" id="mobile-more-menu">{extraItems.map((item) => <button key={item.id} aria-current={page === item.id ? 'page' : undefined} onClick={() => { setPage(item.id); setMobileMore(false); }}><Icon name={item.icon}/>{item.label}</button>)}</div>}
     </nav>
   </div>;
 }
 
-type PageProps = { snapshot: AppSnapshot; updateSnapshot: (update: Partial<AppSnapshot>) => void; navigate: (page: Page) => void };
+type PageProps = { snapshot: AppSnapshot; updateSnapshot: (update: Partial<AppSnapshot>) => void; navigate: (page: Page, focus?: NavigationFocus) => void };
 
 function HomePage({ snapshot, navigate }: PageProps) {
-  const batch = snapshot.activeBatch;
   const servicesReady = Object.values(snapshot.settings.services).every(Boolean);
+  const [workbench, setWorkbench] = useState<WeeklyWorkbench | null>(snapshot.weeklyWorkbench ?? null);
+  const [coverage, setCoverage] = useState<CoverageMap | null>(snapshot.coverageMap ?? null);
+  const [loading, setLoading] = useState(!snapshot.weeklyWorkbench || !snapshot.coverageMap);
+  const [loadError, setLoadError] = useState('');
+  const [scheduleMessage, setScheduleMessage] = useState('');
+  const today = new Date().toISOString().slice(0, 10);
+  const weekStart = useMemo(() => {
+    const date = new Date(`${today}T12:00:00`);
+    const day = date.getDay() || 7;
+    date.setDate(date.getDate() - day + 1);
+    return date.toISOString().slice(0, 10);
+  }, [today]);
+  const loadWorkbench = async () => {
+    setLoading(true); setLoadError('');
+    const [weeklyResult, coverageResult] = await Promise.all([api.getWeeklyWorkbench(weekStart), api.getCoverageMap(snapshot.settings.startDate, today)]);
+    if (weeklyResult.ok && weeklyResult.data) setWorkbench(weeklyResult.data); else setLoadError(weeklyResult.error?.message ?? 'No se pudo preparar la mesa semanal.');
+    if (coverageResult.ok && coverageResult.data) setCoverage(coverageResult.data); else setLoadError((current) => current || coverageResult.error?.message || 'No se pudo calcular la cobertura.');
+    setLoading(false);
+  };
+  useEffect(() => { if (!snapshot.weeklyWorkbench || !snapshot.coverageMap) void loadWorkbench(); }, []);
+
+  const skipExpected = async (expected: WeeklyWorkbench['expectedDocuments'][number]) => {
+    const supplier = snapshot.suppliers.find((item) => item.id === expected.supplierId);
+    const current = snapshot.supplierSchedules?.find((item) => item.supplierId === expected.supplierId) ?? supplier?.schedule;
+    const period = expected.expectedDate.slice(0, 7);
+    const schedule: SupplierSchedule = current ?? { supplierId: expected.supplierId, frequency: supplier?.frequency ?? expected.frequency, excludedPeriods: [], evidence: 'Excepción decidida manualmente desde la mesa semanal.' };
+    const result = await api.saveSupplierSchedule({ ...schedule, excludedPeriods: [...new Set([...schedule.excludedPeriods, period])] });
+    if (!result.ok) { setScheduleMessage(result.error?.message ?? 'No se pudo guardar la excepción.'); return; }
+    setWorkbench((currentWorkbench) => currentWorkbench ? { ...currentWorkbench, expectedDocuments: currentWorkbench.expectedDocuments.map((item) => item.id === expected.id ? { ...item, status: 'SKIPPED', detail: `No esperado en ${period}; decisión guardada.` } : item) } : currentWorkbench);
+    setScheduleMessage('La excepción del periodo quedó guardada; la frecuencia histórica no se modificó.');
+  };
+
   return <>
-    <SectionHeader eyebrow="Mesa de administración" title="Qué necesita atención hoy" description="Decide con evidencia. La aplicación no archiva ni confirma nada sin tu aprobación." action={<Button icon="process" onClick={() => navigate('process')}>Analizar correos</Button>}/>
+    <SectionHeader eyebrow="Mesa semanal" title="Qué necesita atención hoy" description="Una ruta única para capturar, validar, conciliar y cerrar, conservando siempre la decisión humana." action={<Button variant={workbench?.nextAction ? 'secondary' : 'primary'} icon="process" onClick={() => navigate('process')}>Analizar correos</Button>}/>
     <div className={`system-strip ${servicesReady ? 'is-ready' : 'is-error'}`}><Icon name={servicesReady ? 'shield' : 'warning'}/><div><strong>{servicesReady ? 'Fuentes conectadas y preparadas' : 'Hay conexiones que requieren atención'}</strong><span>Gmail · ReparaPRO Docs · Drive de Contabilidad</span></div><button onClick={() => navigate('settings')}>Ver diagnóstico <Icon name="chevron" size={15}/></button></div>
-    <section className="workbench">
-      <div className="workbench__lead">
-        <p className="eyebrow">Siguiente decisión</p>
-        {batch ? <><div className="batch-marker"><span>{batch.id}</span><StatusBadge status={batch.status}/></div><h2>{batch.documents.filter((item) => item.phase === 'LISTO PARA APROBAR').length} documentos listos para cerrar</h2><p>El lote revisó {batch.reviewedEmails} correos y encontró {batch.pdfCount} PDF. Comprueba la cadena documental antes de aprobar.</p><EvidenceChain active={4}/><div className="workbench__actions"><Button icon="eye" onClick={() => navigate('process')}>Revisar lote</Button><Button variant="secondary" icon="review" onClick={() => navigate('review')}>Resolver excepciones</Button></div></> : <EmptyState icon="mail" title="No hay un lote activo">Inicia un análisis para localizar nuevos PDF en Gmail.</EmptyState>}
-      </div>
-      <div className="work-queues">
-        <QueueItem label="Revisión manual" value={snapshot.reviewCount} detail="requieren criterio humano" icon="review" action={() => navigate('review')}/>
-        <QueueItem label="Conciliación" value={snapshot.bankImports.flatMap((item) => item.movements).filter((item) => item.status === 'CANDIDATA PENDIENTE').length} detail="candidatas sin confirmar" icon="bank" action={() => navigate('bank')}/>
-        <QueueItem label="Archivo controlado" value={snapshot.processedCount} detail="facturas procesadas" icon="archive" action={() => navigate('invoices')}/>
-      </div>
-    </section>
+    {loading && !workbench ? <WeeklyWorkbenchSkeleton/> : loadError && !workbench ? <section className="workbench-error" role="alert"><Icon name="error" size={24}/><div><strong>No se pudo preparar la semana</strong><p>{loadError}</p></div><Button variant="secondary" icon="refresh" onClick={loadWorkbench}>Reintentar</Button></section> : workbench && <>
+      <nav className="workflow-rail" aria-label="Flujo semanal">{workbench.steps.map((step, index) => <button key={step.id} className={`workflow-step workflow-step--${step.status.toLowerCase()}`} onClick={() => navigate(step.route)}><span>{step.status === 'DONE' ? <Icon name="check" size={17}/> : index + 1}</span><div><strong>{step.label}</strong><small>{step.count ? `${step.count} pendientes` : 'Al día'}</small></div>{index < workbench.steps.length - 1 && <i><Icon name="arrow" size={15}/></i>}</button>)}</nav>
+      <section className="weekly-focus">
+        <div className="next-action">
+          <span className="next-action__label"><Icon name="arrow" size={16}/>Siguiente acción recomendada</span>
+          {workbench.nextAction ? <><div className="next-action__meta"><StatusBadge status={`PRIORIDAD ${workbench.nextAction.priority === 'HIGH' ? 'ALTA' : workbench.nextAction.priority === 'MEDIUM' ? 'MEDIA' : 'BAJA'}`}/><span>{workbench.nextAction.count} {workbench.nextAction.count === 1 ? 'elemento' : 'elementos'}</span></div><h2>{workbench.nextAction.title}</h2><p>{workbench.nextAction.detail}</p><Button icon="arrow" onClick={() => navigate(workbench.nextAction!.route, { entityId: workbench.nextAction!.entityId, period: workbench.nextAction!.step === 'CLOSE' ? weekStart.slice(0, 7) : undefined })}>{workbench.nextAction.actionLabel}</Button></> : <EmptyState icon="check" title="La semana está al día">No quedan decisiones prioritarias con la cobertura disponible.</EmptyState>}
+        </div>
+        <div className="action-counters" aria-label="Contadores accionables">
+          <ActionCounter label="Correos sin analizar" value={workbench.counters.emailsPendingAnalysis} detail="mínimo acreditado por el cursor" icon="mail" action={() => navigate('process')}/>
+          <ActionCounter label="Facturas con datos inválidos" value={workbench.counters.invalidInvoices} detail="bloquean aprobación" icon="warning" action={() => navigate('review')}/>
+          <ActionCounter label="Proveedores sin identificar" value={workbench.counters.unidentifiedSuppliers} detail="necesitan evidencia" icon="supplier" action={() => navigate('review')}/>
+          <ActionCounter label="Propuestas de conciliación" value={workbench.counters.pendingReconciliations} detail="nunca se aplican solas" icon="bank" action={() => navigate('bank')}/>
+          <ActionCounter label="Movimientos sin justificante" value={workbench.counters.movementsWithoutInvoice} detail="dentro de la cobertura" icon="search" action={() => navigate('bank')}/>
+          <ActionCounter label="Bloqueos del cierre" value={workbench.counters.monthlyCloseBlockers} detail="requieren decisión" icon="archive" action={() => navigate('close')}/>
+        </div>
+      </section>
+      {coverage ? <CoverageTimeline coverage={coverage} navigate={navigate}/> : <section className="coverage-panel coverage-panel--loading"><div className="skeleton-line"/><div className="skeleton-block"/></section>}
+      <section className="weekly-agenda"><div className="subhead"><div><h2>Agenda de documentos esperados</h2><p>La recurrencia orienta la búsqueda; nunca crea ni aprueba facturas.</p></div><StatusBadge status={`${workbench.expectedDocuments.filter((item) => item.status === 'EXPECTED').length} ESPERADOS`}/></div>{workbench.expectedDocuments.length ? <div className="expected-list">{workbench.expectedDocuments.map((item) => <article key={item.id} className={item.status === 'SKIPPED' ? 'is-skipped' : ''}><div className="expected-date"><strong>{new Date(`${item.expectedDate}T12:00:00`).getDate()}</strong><span>{new Intl.DateTimeFormat('es-ES', { month: 'short' }).format(new Date(`${item.expectedDate}T12:00:00`))}</span></div><div><strong>{item.supplierName}</strong><p>{item.detail}</p><small>{frequencyLabel(item.frequency)}{item.dueDate ? ` · Vence ${formatDate(item.dueDate)}` : ''}</small></div><StatusBadge status={item.status === 'SKIPPED' ? 'NO ESPERADA ESTE PERIODO' : item.status === 'RECEIVED' ? 'RECIBIDA' : 'ESPERADA'}/><div className="expected-actions"><Button variant="quiet" icon="mail" onClick={() => navigate('process', { entityId: item.expectedDate, supplierId: item.supplierId })}>Buscar en Gmail</Button><Button variant="quiet" icon="supplier" onClick={() => navigate('suppliers', { supplierId: item.supplierId })}>Abrir proveedor</Button>{item.status === 'EXPECTED' && <Button variant="quiet" onClick={() => skipExpected(item)}>No esperada este periodo</Button>}</div></article>)}</div> : <EmptyState icon="check" title="Sin documentos esperados">No hay recurrencias activas para esta semana.</EmptyState>}{scheduleMessage && <p className="inline-note" role="status"><Icon name="check" size={16}/>{scheduleMessage}</p>}</section>
+    </>}
     <section className="recent-section"><div className="subhead"><div><p className="eyebrow">Trazabilidad reciente</p><h2>Últimas acciones</h2></div><button className="text-link" onClick={() => navigate('history')}>Ver todo <Icon name="arrow" size={15}/></button></div><div className="timeline">{snapshot.audit.slice(0, 3).map((event) => <div key={event.id}><span className={`timeline__dot timeline__dot--${event.level.toLowerCase()}`}/><div><strong>{event.action.replaceAll('_', ' ')}</strong><p>{event.detail}</p><small>{formatDate(event.timestamp, true)} · {event.user}</small></div></div>)}</div></section>
   </>;
 }
 
-function QueueItem({ label, value, detail, icon, action }: { label: string; value: number; detail: string; icon: IconName; action: () => void }) {
-  return <button className="queue-item" onClick={action}><span className="queue-item__icon"><Icon name={icon}/></span><div><small>{label}</small><strong>{value}</strong><p>{detail}</p></div><Icon name="chevron" size={18}/></button>;
+function WeeklyWorkbenchSkeleton() {
+  return <section className="weekly-skeleton" aria-label="Cargando mesa semanal"><div className="skeleton-line"/><div className="skeleton-block"/><div className="skeleton-grid">{Array.from({ length: 6 }, (_, index) => <span key={index}/>)}</div></section>;
+}
+
+function ActionCounter({ label, value, detail, icon, action }: { label: string; value: number; detail: string; icon: IconName; action: () => void }) {
+  return <button className="action-counter" onClick={action}><span><Icon name={icon} size={18}/></span><div><strong>{label}</strong><small>{detail}</small></div><b>{value}</b><Icon name="chevron" size={16}/></button>;
+}
+
+function CoverageTimeline({ coverage, navigate }: { coverage: CoverageMap; navigate: (page: Page, focus?: NavigationFocus) => void }) {
+  const fromMs = new Date(`${coverage.from}T12:00:00`).getTime();
+  const toMs = new Date(`${coverage.to}T12:00:00`).getTime();
+  const span = Math.max(toMs - fromMs, 86400000);
+  const position = (value: string) => Math.max(0, Math.min(100, ((new Date(`${value}T12:00:00`).getTime() - fromMs) / span) * 100));
+  const monthTicks = Array.from({ length: 8 }, (_, index) => {
+    const date = new Date('2026-01-01T12:00:00'); date.setMonth(index); return date;
+  }).filter((date) => date.getTime() >= fromMs && date.getTime() <= toMs);
+  return <section className="coverage-panel"><div className="coverage-panel__head"><div><h2>Mapa de cobertura</h2><p>Correo y extractos mantienen recorridos separados. Los espacios vacíos son periodos sin acreditar.</p></div>{coverage.nextGmailCursor && <Button variant="secondary" icon="mail" onClick={() => navigate('process', { batchId: coverage.nextGmailCursor?.batchId, entityId: coverage.nextGmailCursor?.date })}>Continuar Gmail desde {formatDate(coverage.nextGmailCursor.date)}</Button>}</div><div className="coverage-legend" aria-label="Leyenda de cobertura"><span className="is-complete">Completa</span><span className="is-partial">Parcial</span><span className="is-gap">Con huecos</span><span className="is-unreviewed">Sin revisar</span></div><div className="coverage-chart"><div className="coverage-axis"><span>Fuente</span><div>{monthTicks.map((date) => <i key={date.toISOString()} style={{ left: `${position(date.toISOString().slice(0, 10))}%` }}>{new Intl.DateTimeFormat('es-ES', { month: 'short' }).format(date)}</i>)}</div></div>{coverage.lanes.map((lane) => <div className="coverage-lane" key={lane.id}><strong><Icon name={lane.type === 'GMAIL' ? 'mail' : 'bank'} size={16}/>{lane.name}</strong><div className="coverage-track">{lane.segments.map((segment) => { const left = position(segment.from); const right = position(segment.to); return <button key={segment.id} className={`coverage-segment coverage-segment--${segment.status.toLowerCase().replaceAll(' ', '-')}`} style={{ left: `${left}%`, width: `${Math.max(right - left, 2.5)}%` }} title={`${segment.detail} ${formatDate(segment.from)} – ${formatDate(segment.to)}`} aria-label={`${lane.name}: ${segment.status}, ${formatDate(segment.from)} a ${formatDate(segment.to)}`} onClick={() => navigate(segment.route, { batchId: segment.batchIds?.[0], importId: segment.importId, entityId: lane.type === 'GMAIL' ? segment.from : segment.id, period: `${segment.from}/${segment.to}` })}><span>{segment.status}</span><small>{formatDate(segment.from)} – {formatDate(segment.to)}</small></button>; })}</div></div>)}</div>{coverage.warnings.length > 0 && <div className="coverage-warnings">{coverage.warnings.map((warning) => <p key={warning}><Icon name="warning" size={15}/>{warning}</p>)}</div>}</section>;
+}
+
+function frequencyLabel(frequency: SupplierFrequency) {
+  return ({ NONE: 'Sin frecuencia', MONTHLY: 'Mensual', QUARTERLY: 'Trimestral', ANNUAL: 'Anual' } as const)[frequency];
 }
 
 function ProcessingPage({ snapshot, updateSnapshot, navigate }: PageProps) {
-  const [form, setForm] = useState({ dateFrom: snapshot.settings.startDate, dateTo: new Date().toISOString().slice(0, 10), maxEmails: 10 });
+  const focus = useMemo(() => readNavigationFocus('process'), []);
+  const focusDate = focus?.entityId && /^\d{4}-\d{2}-\d{2}$/.test(focus.entityId) ? focus.entityId : snapshot.settings.startDate;
+  const [form, setForm] = useState({ dateFrom: focusDate, dateTo: new Date().toISOString().slice(0, 10), maxEmails: 10 });
   const [working, setWorking] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [cancelConfirm, setCancelConfirm] = useState(false);
@@ -139,6 +213,7 @@ function ProcessingPage({ snapshot, updateSnapshot, navigate }: PageProps) {
       <div className="setup-panel">
         <div className="panel-title"><span>1</span><div><h2>Alcance del análisis</h2><p>Máximo 20 correos; el servidor trabaja en bloques de 5.</p></div></div>
         <div className="form-grid"><Field label="Desde"><input type="date" value={form.dateFrom} onChange={(e) => setForm({ ...form, dateFrom: e.target.value })}/></Field><Field label="Hasta"><input type="date" value={form.dateTo} onChange={(e) => setForm({ ...form, dateTo: e.target.value })}/></Field><Field label="Correos"><select value={form.maxEmails} onChange={(e) => setForm({ ...form, maxEmails: Number(e.target.value) })}><option value={10}>10 · piloto</option><option value={15}>15</option><option value={20}>20</option></select></Field></div>
+        {focus?.entityId && /^\d{4}-\d{2}-\d{2}$/.test(focus.entityId) && <p className="cursor-focus" role="status"><Icon name="mail" size={16}/><span><strong>Continuación preparada: {formatDate(focus.entityId)}</strong>{focus.batchId ? ` · lote ${focus.batchId}` : ''}. El formulario usa este cursor para evitar volver a enero.</span></p>}
         {batch && ['ANALIZANDO', 'INTERRUMPIDO'].includes(batch.status) ? <Button icon="refresh" disabled={working} onClick={continueBatch}>{working ? 'Analizando…' : `Continuar análisis · ${batch.progress}%`}</Button> : <Button icon={working ? 'refresh' : 'search'} disabled={working || Boolean(batch && !['COMPLETADO', 'CANCELADO'].includes(batch.status))} onClick={start}>{working ? 'Analizando…' : 'Iniciar análisis'}</Button>}
         {batch?.nextSearchDate && <p className="cursor-note"><Icon name="arrow" size={15}/>Siguiente fecha de búsqueda: {formatDate(batch.nextSearchDate)}</p>}
         {batch && !['COMPLETADO', 'CANCELADO'].includes(batch.status) && <p className="inline-note"><Icon name="warning" size={16}/>Ya existe un lote activo. Debe finalizarse antes de iniciar otro.</p>}
@@ -283,20 +358,22 @@ function ReviewPage({ snapshot, updateSnapshot }: PageProps) {
 }
 
 function InvoicesPage({ snapshot }: PageProps) {
-  const [query, setQuery] = useState(''); const [status, setStatus] = useState('TODOS'); const [detail, setDetail] = useState<InvoiceRecord | null>(null); const [page, setPage] = useState(0);
-  const invoices = useMemo(() => snapshot.invoices.filter((item) => (status === 'TODOS' || item.status === status) && [item.supplier, item.number, item.originalName].join(' ').toLowerCase().includes(query.toLowerCase())), [snapshot.invoices, query, status]);
-  const pageSize = 50; const visibleInvoices = invoices.slice(page * pageSize, (page + 1) * pageSize);
+  const [query, setQuery] = useState(''); const [status, setStatus] = useState('TODOS'); const [detail, setDetail] = useState<InvoiceRecord | null>(null);
+  const [invoices, setInvoices] = useState(snapshot.invoices); const [total, setTotal] = useState(snapshot.invoiceWindow?.total ?? snapshot.invoices.length); const [nextCursor, setNextCursor] = useState(snapshot.invoiceWindow?.complete === false ? String(snapshot.invoiceWindow.returned) : undefined); const [loading, setLoading] = useState(false); const [loadError, setLoadError] = useState('');
+  const loadInvoices = async (append = false) => { setLoading(true); setLoadError(''); const result = await api.listInvoices({ query, status, cursor: append ? nextCursor : undefined, limit: 50 }); setLoading(false); if (!result.ok || !result.data) { setLoadError(result.error?.message ?? 'No se pudieron cargar las facturas.'); return; } setInvoices((current) => append ? [...current, ...result.data!.items.filter((item) => !current.some((existing) => existing.id === item.id))] : result.data!.items); setTotal(result.data.total); setNextCursor(result.data.nextCursor); };
+  useEffect(() => { const timer = window.setTimeout(() => { void loadInvoices(false); }, 250); return () => window.clearTimeout(timer); }, [query, status]);
   return <>
     <SectionHeader eyebrow="Archivo documental" title="Facturas y documentos" description="Consulta el resultado, el origen y la trazabilidad de cada documento registrado."/>
-    <div className="table-toolbar"><label className="search-box"><Icon name="search" size={18}/><input placeholder="Buscar proveedor, número o archivo" value={query} onChange={(e) => setQuery(e.target.value)}/></label><select value={status} onChange={(e) => setStatus(e.target.value)}><option>TODOS</option><option>PROCESADA</option><option>REVISIÓN MANUAL</option><option>DUPLICADO IGNORADO</option><option>NO ES FACTURA</option><option>FACTURA DE VENTA</option></select><span>{invoices.length} resultados</span></div>
-    <div className="data-table"><table><thead><tr><th>Fecha</th><th>Proveedor / documento</th><th>Número</th><th className="numeric">Importe</th><th>Estado</th><th/></tr></thead><tbody>{visibleInvoices.map((invoice) => <tr key={invoice.id}><td>{formatDate(invoice.date)}</td><td><strong>{invoice.supplier}</strong><small>{invoice.originalName}</small>{invoice.nonRegularSupplier && <span className="supplier-frequency-tag">No habitual</span>}</td><td className="mono">{invoice.number || '—'}</td><td className="numeric">{formatCurrency(invoice.total, invoice.currency)}</td><td><StatusBadge status={invoice.status}/></td><td><button className="icon-button" aria-label="Ver detalle" onClick={() => setDetail(invoice)}><Icon name="eye"/></button></td></tr>)}</tbody></table></div><Pagination page={page} total={invoices.length} pageSize={pageSize} onPage={setPage}/>
+    <div className="table-toolbar"><label className="search-box"><Icon name="search" size={18}/><input placeholder="Buscar proveedor, número o archivo" value={query} onChange={(e) => setQuery(e.target.value)}/></label><select value={status} onChange={(e) => setStatus(e.target.value)}><option>TODOS</option><option>PROCESADA</option><option>REVISIÓN MANUAL</option><option>DUPLICADO IGNORADO</option><option>NO ES FACTURA</option><option>FACTURA DE VENTA</option></select><span>Mostrando {invoices.length} de {total}</span></div>
+    {loadError && <p className="inline-note" role="alert"><Icon name="error" size={16}/>{loadError}</p>}<div className="data-table"><table><thead><tr><th>Fecha</th><th>Proveedor / documento</th><th>Número</th><th className="numeric">Importe</th><th>Estado</th><th/></tr></thead><tbody>{invoices.map((invoice) => <tr key={invoice.id}><td>{formatDate(invoice.date)}</td><td><strong>{invoice.supplier}</strong><small>{invoice.originalName}</small>{invoice.nonRegularSupplier && <span className="supplier-frequency-tag">No habitual</span>}</td><td className="mono">{invoice.number || '—'}</td><td className="numeric">{formatCurrency(invoice.total, invoice.currency)}</td><td><StatusBadge status={invoice.status}/></td><td><button className="icon-button" aria-label="Ver detalle" onClick={() => setDetail(invoice)}><Icon name="eye"/></button></td></tr>)}</tbody></table></div>{nextCursor && <div className="candidate-pagination"><span>Quedan {Math.max(total - invoices.length, 0)} resultados</span><Button variant="secondary" icon="refresh" disabled={loading} onClick={() => loadInvoices(true)}>{loading ? 'Cargando…' : 'Cargar más'}</Button></div>}
     {detail && <Modal title="Cadena documental" onClose={() => setDetail(null)}><div className="invoice-detail"><div className="invoice-detail__hero"><span><Icon name="invoice" size={30}/></span><div><StatusBadge status={detail.status}/><h3>{detail.supplier}</h3><p>{detail.number} · {formatCurrency(detail.total, detail.currency)}</p></div></div><EvidenceChain active={detail.status === 'PROCESADA' ? 5 : 3}/><dl><div><dt>Fecha de emisión</dt><dd>{formatDate(detail.date)}</dd></div><div><dt>CIF / NIF</dt><dd>{detail.taxId || 'Sin dato acreditado'}</dd></div><div><dt>Frecuencia</dt><dd>{detail.nonRegularSupplier ? 'Proveedor no habitual' : 'Proveedor habitual'}</dd></div><div><dt>Archivo original</dt><dd>{detail.originalName}</dd></div><div><dt>Lote</dt><dd className="mono">{detail.batchId}</dd></div><div><dt>Huella</dt><dd className="mono">{detail.hash}</dd></div></dl><div className="link-row">{detail.gmailUrl && <a className="button button--secondary" href={detail.gmailUrl} target="_blank" rel="noreferrer"><Icon name="mail" size={17}/>Correo</a>}{detail.driveUrl && <a className="button button--primary" href={detail.driveUrl} target="_blank" rel="noreferrer"><Icon name="archive" size={17}/>Archivo en Drive</a>}</div></div></Modal>}
   </>;
 }
 
 function SuppliersPage({ snapshot, updateSnapshot }: PageProps) {
   const empty: Supplier = { id: '', name: '', domain: '', taxId: '', aliases: [], active: true, evidence: '', updatedAt: '', updatedBy: '', invoiceCount: 0 };
-  const [editing, setEditing] = useState<Supplier | null>(null); const [merging, setMerging] = useState({ sourceId: '', targetId: '', reason: '' }); const [showMerge, setShowMerge] = useState(false); const [mergeError, setMergeError] = useState(''); const [showInactive, setShowInactive] = useState(false); const [query, setQuery] = useState('');
+  const focus = useMemo(() => readNavigationFocus('suppliers'), []);
+  const [editing, setEditing] = useState<Supplier | null>(null); const [automationSupplier, setAutomationSupplier] = useState<Supplier | null>(() => snapshot.suppliers.find((item) => item.id === focus?.supplierId) ?? null); const [merging, setMerging] = useState({ sourceId: '', targetId: '', reason: '' }); const [showMerge, setShowMerge] = useState(false); const [mergeError, setMergeError] = useState(''); const [showInactive, setShowInactive] = useState(false); const [query, setQuery] = useState('');
   const suppliers = snapshot.suppliers.filter((item) => (showInactive || item.active) && `${item.name} ${item.domain} ${item.taxId}`.toLowerCase().includes(query.toLowerCase()));
   const save = async () => { if (!editing?.name.trim()) return; const result = await api.saveSupplier(editing); if (result.ok && result.data) { const next = snapshot.suppliers.some((item) => item.id === result.data!.id) ? snapshot.suppliers.map((item) => item.id === result.data!.id ? result.data! : item) : [result.data, ...snapshot.suppliers]; updateSnapshot({ suppliers: next }); setEditing(null); } };
   const toggle = async (supplier: Supplier) => { const result = await api.toggleSupplier(supplier.id, !supplier.active); if (result.ok && result.data) updateSnapshot({ suppliers: snapshot.suppliers.map((item) => item.id === supplier.id ? result.data! : item) }); };
@@ -305,32 +382,123 @@ function SuppliersPage({ snapshot, updateSnapshot }: PageProps) {
   return <>
     <SectionHeader eyebrow="Catálogo acreditado" title="Proveedores" description="Solo los proveedores activos y respaldados por evidencia pueden identificar facturas automáticamente." action={<><Button variant="secondary" icon="download" onClick={exportCsv}>Exportar</Button><Button variant="secondary" icon="refresh" onClick={() => setShowMerge(true)}>Fusionar</Button><Button icon="plus" onClick={() => setEditing(empty)}>Añadir proveedor</Button></>}/>
     <div className="table-toolbar"><label className="search-box"><Icon name="search" size={18}/><input placeholder="Buscar proveedor, dominio o CIF" value={query} onChange={(e) => setQuery(e.target.value)}/></label><label className="switch-label"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)}/><span/>Incluir inactivos</label><span>{suppliers.length} proveedores</span></div>
-    <div className="supplier-grid">{suppliers.map((supplier) => <article key={supplier.id} className={!supplier.active ? 'is-inactive' : ''}><header><span className="supplier-mark">{supplier.name.slice(0, 2).toUpperCase()}</span><StatusBadge status={supplier.active ? 'ACTIVO' : 'INACTIVO'}/></header><h3>{supplier.name}</h3><dl><div><dt>Dominio</dt><dd>{supplier.domain || 'Sin dato acreditado'}</dd></div><div><dt>CIF / NIF</dt><dd>{supplier.taxId || 'Sin dato acreditado'}</dd></div><div><dt>Histórico</dt><dd>{supplier.invoiceCount} facturas</dd></div></dl>{supplier.aliases.length > 0 && <p className="aliases">También: {supplier.aliases.join(', ')}</p>}<footer><button onClick={() => setEditing(supplier)}><Icon name="edit" size={16}/>Editar</button><button onClick={() => toggle(supplier)}>{supplier.active ? 'Desactivar' : 'Reactivar'}</button></footer></article>)}</div>
+    <div className="supplier-grid">{suppliers.map((supplier) => <article key={supplier.id} className={!supplier.active ? 'is-inactive' : ''}><header><span className="supplier-mark">{supplier.name.slice(0, 2).toUpperCase()}</span><StatusBadge status={supplier.active ? 'ACTIVO' : 'INACTIVO'}/></header><h3>{supplier.name}</h3><dl><div><dt>Dominio</dt><dd>{supplier.domain || 'Sin dato acreditado'}</dd></div><div><dt>CIF / NIF</dt><dd>{supplier.taxId || 'Sin dato acreditado'}</dd></div><div><dt>Histórico</dt><dd>{supplier.invoiceCount} facturas</dd></div><div><dt>Frecuencia</dt><dd>{frequencyLabel(supplier.frequency ?? 'NONE')}</dd></div></dl>{supplier.aliases.length > 0 && <p className="aliases">También: {supplier.aliases.join(', ')}</p>}<footer><button onClick={() => setEditing(supplier)}><Icon name="edit" size={16}/>Editar</button><button onClick={() => setAutomationSupplier(supplier)}><Icon name="settings" size={16}/>Reglas y frecuencia</button><button onClick={() => toggle(supplier)}>{supplier.active ? 'Desactivar' : 'Reactivar'}</button></footer></article>)}</div>
     {editing && <Modal title={editing.id ? 'Editar proveedor' : 'Añadir proveedor'} onClose={() => setEditing(null)} footer={<><Button variant="secondary" onClick={() => setEditing(null)}>Cancelar</Button><Button icon="check" disabled={!editing.name.trim() || !editing.evidence.trim()} onClick={save}>Guardar proveedor</Button></>}><div className="form-stack"><Field label="Nombre canónico"><input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })}/></Field><div className="form-grid"><Field label="Dominio confirmado"><input placeholder="ejemplo.com" value={editing.domain} onChange={(e) => setEditing({ ...editing, domain: e.target.value.toLowerCase() })}/></Field><Field label="CIF / NIF"><input value={editing.taxId} onChange={(e) => setEditing({ ...editing, taxId: e.target.value.toUpperCase() })}/></Field></div><Field label="Aliases acreditados" hint="Separados por punto y coma"><input value={editing.aliases.join('; ')} onChange={(e) => setEditing({ ...editing, aliases: e.target.value.split(';').map((value) => value.trim()).filter(Boolean) })}/></Field><Field label="Evidencia" hint="Ej.: Factura N 2026/003161 de ALAS COURIER S.L., CIF B78942877, recibida desde tip-sa.com"><textarea rows={3} placeholder="Documento y fragmento concreto que acreditan el nombre, dominio y CIF/NIF" value={editing.evidence} onChange={(e) => setEditing({ ...editing, evidence: e.target.value })}/></Field></div></Modal>}
     {showMerge && <Modal title="Fusionar proveedores" onClose={() => setShowMerge(false)} footer={<><Button variant="secondary" onClick={() => setShowMerge(false)}>Cancelar</Button><Button icon="check" disabled={!merging.sourceId || !merging.targetId || merging.sourceId === merging.targetId || !merging.reason.trim()} onClick={merge}>Confirmar fusión</Button></>}><div className="form-stack"><p className="inline-note"><Icon name="warning" size={16}/>El proveedor de origen se desactivará. El histórico permanecerá intacto y solo los documentos pendientes pasarán al proveedor de destino.</p><Field label="Proveedor de origen"><select value={merging.sourceId} onChange={(e) => setMerging({ ...merging, sourceId: e.target.value })}><option value="">Seleccionar</option>{snapshot.suppliers.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field><Field label="Proveedor de destino"><select value={merging.targetId} onChange={(e) => setMerging({ ...merging, targetId: e.target.value })}><option value="">Seleccionar</option>{snapshot.suppliers.filter((item) => item.active && item.id !== merging.sourceId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field><Field label="Motivo y evidencia"><textarea rows={3} value={merging.reason} onChange={(e) => setMerging({ ...merging, reason: e.target.value })}/></Field>{mergeError && <p className="inline-note"><Icon name="error" size={16}/>{mergeError}</p>}</div></Modal>}
+    {automationSupplier && <SupplierAutomationModal supplier={automationSupplier} snapshot={snapshot} updateSnapshot={updateSnapshot} onClose={() => setAutomationSupplier(null)}/>}
   </>;
 }
 
+function SupplierAutomationModal({ supplier, snapshot, updateSnapshot, onClose }: { supplier: Supplier; snapshot: AppSnapshot; updateSnapshot: (update: Partial<AppSnapshot>) => void; onClose: () => void }) {
+  const blankRule = (): SupplierRule => ({ id: '', supplierId: supplier.id, type: 'BANK_CONCEPT', pattern: '', value: '', active: true, evidence: '', createdAt: '', createdBy: '', updatedAt: '', updatedBy: '' });
+  const existingSchedule = supplier.schedule ?? snapshot.supplierSchedules?.find((item) => item.supplierId === supplier.id);
+  const [rules, setRules] = useState<SupplierRule[]>(snapshot.supplierRules?.filter((item) => item.supplierId === supplier.id) ?? []);
+  const [ruleDraft, setRuleDraft] = useState<SupplierRule>(blankRule);
+  const [schedule, setSchedule] = useState<SupplierSchedule>(existingSchedule ?? { supplierId: supplier.id, frequency: supplier.frequency ?? 'NONE', expectedDay: undefined, excludedPeriods: [], evidence: '' });
+  const [loadingRules, setLoadingRules] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  useEffect(() => {
+    setLoadingRules(true);
+    void api.listSupplierRules(supplier.id, false).then((result) => {
+      setLoadingRules(false);
+      if (result.ok && result.data) {
+        setRules(result.data);
+        updateSnapshot({ supplierRules: [...(snapshot.supplierRules ?? []).filter((item) => item.supplierId !== supplier.id), ...result.data] });
+      } else setMessage(result.error?.message ?? 'No se pudieron cargar las reglas.');
+    });
+  }, [supplier.id]);
+  const saveRule = async () => {
+    if (!ruleDraft.evidence.trim() || (!ruleDraft.value.trim() && !ruleDraft.pattern.trim())) { setMessage('Indica el valor propuesto y la evidencia que lo acredita.'); return; }
+    setSaving(true); setMessage('');
+    const result = await api.saveSupplierRule(ruleDraft);
+    setSaving(false);
+    if (!result.ok || !result.data) { setMessage(result.error?.message ?? 'No se pudo guardar la regla.'); return; }
+    const nextRules = [result.data, ...rules.filter((item) => item.id !== result.data!.id)];
+    setRules(nextRules); setRuleDraft(blankRule()); updateSnapshot({ supplierRules: [...(snapshot.supplierRules ?? []).filter((item) => item.id !== result.data!.id), result.data] });
+    setMessage('Regla guardada. Solo se utilizará como propuesta.');
+  };
+  const deactivateRule = async (rule: SupplierRule) => {
+    const reason = window.prompt('Motivo para desactivar esta regla');
+    if (!reason?.trim()) return;
+    const result = await api.deactivateSupplierRule(rule.id, reason.trim());
+    if (!result.ok || !result.data) { setMessage(result.error?.message ?? 'No se pudo desactivar la regla.'); return; }
+    setRules((current) => current.map((item) => item.id === rule.id ? result.data! : item));
+    updateSnapshot({ supplierRules: (snapshot.supplierRules ?? []).map((item) => item.id === rule.id ? result.data! : item) });
+  };
+  const testRule = (rule: SupplierRule) => {
+    if (['DEFAULT_CATEGORY', 'DEFAULT_CURRENCY'].includes(rule.type)) { setMessage(`La regla propondría “${rule.value}”. No se guardó ni aplicó ningún cambio.`); return; }
+    const sample = window.prompt('Texto sintético o acreditado que quieres probar');
+    if (sample === null) return;
+    const matches = normalizeText(sample).includes(normalizeText(rule.pattern || rule.value));
+    setMessage(`${matches ? 'Coincide' : 'No coincide'} con la regla “${rule.pattern || rule.value}”. La prueba no guardó ni aplicó cambios.`);
+  };
+  const saveSchedule = async () => {
+    if (schedule.frequency !== 'NONE' && !schedule.evidence.trim()) { setMessage('Acredita la frecuencia antes de guardarla.'); return; }
+    setSaving(true); setMessage('');
+    const result = await api.saveSupplierSchedule(schedule);
+    setSaving(false);
+    if (!result.ok || !result.data) { setMessage(result.error?.message ?? 'No se pudo guardar la frecuencia.'); return; }
+    updateSnapshot({ suppliers: snapshot.suppliers.map((item) => item.id === result.data!.id ? result.data! : item), supplierSchedules: [schedule, ...(snapshot.supplierSchedules ?? []).filter((item) => item.supplierId !== supplier.id)] });
+    setMessage('Frecuencia guardada. La agenda hará sugerencias, nunca acciones automáticas.');
+  };
+  const ruleValueControl = ruleDraft.type === 'DEFAULT_CATEGORY'
+    ? <select value={ruleDraft.value} onChange={(event) => setRuleDraft({ ...ruleDraft, value: event.target.value })}><option value="">Seleccionar categoría</option>{snapshot.categories.filter((item) => item.active).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select>
+    : <input value={ruleDraft.value} placeholder={ruleDraft.type === 'DEFAULT_CURRENCY' ? 'EUR' : 'Valor que se propondrá'} onChange={(event) => setRuleDraft({ ...ruleDraft, value: ruleDraft.type === 'DEFAULT_CURRENCY' ? event.target.value.toUpperCase() : event.target.value })}/>;
+  return <Modal title={`Reglas y frecuencia · ${supplier.name}`} size="wide" onClose={onClose} footer={<Button onClick={onClose}>Cerrar</Button>}><div className="supplier-automation"><section><div className="subhead"><div><h3>Reglas acreditadas</h3><p>Mejoran sugerencias; nunca crean proveedores, aprueban ni concilian por sí solas.</p></div><StatusBadge status={`${rules.filter((item) => item.active).length} ACTIVAS`}/></div>{loadingRules ? <div className="rule-loading"><span/><span/></div> : rules.length ? <div className="supplier-rule-list">{rules.map((rule) => <article key={rule.id} className={!rule.active ? 'is-inactive' : ''}><div><StatusBadge status={supplierRuleLabel(rule.type)}/><strong>{rule.pattern || rule.value}</strong><p>{rule.evidence}</p></div><span>{rule.value && rule.pattern ? `Propone: ${rule.value}` : 'Solo propuesta'}</span><div className="supplier-rule-actions"><Button variant="quiet" onClick={() => testRule(rule)}>Probar</Button>{rule.active && <Button variant="quiet" onClick={() => deactivateRule(rule)}>Desactivar</Button>}</div></article>)}</div> : <EmptyState icon="search" title="Aún no hay reglas">Añade únicamente patrones confirmados por una decisión humana.</EmptyState>}<div className="rule-editor"><Field label="Tipo de regla"><select value={ruleDraft.type} onChange={(event) => setRuleDraft({ ...ruleDraft, type: event.target.value as SupplierRuleType, pattern: '', value: '' })}><option value="BANK_CONCEPT">Texto del concepto bancario</option><option value="EMAIL_DOMAIN">Dominio de correo</option><option value="SENDER_EMAIL">Remitente exacto</option><option value="DEFAULT_CATEGORY">Categoría predeterminada</option><option value="DEFAULT_CURRENCY">Moneda habitual</option></select></Field>{!['DEFAULT_CATEGORY', 'DEFAULT_CURRENCY'].includes(ruleDraft.type) && <Field label="Patrón acreditado"><input value={ruleDraft.pattern} onChange={(event) => setRuleDraft({ ...ruleDraft, pattern: event.target.value, value: event.target.value })}/></Field>}<Field label="Valor propuesto">{ruleValueControl}</Field><Field label="Evidencia"><textarea rows={2} value={ruleDraft.evidence} onChange={(event) => setRuleDraft({ ...ruleDraft, evidence: event.target.value })}/></Field><Button icon="plus" disabled={saving} onClick={saveRule}>Guardar regla</Button></div></section><section className="schedule-editor"><div className="subhead"><div><h3>Frecuencia esperada</h3><p>La agenda semanal avisa si falta un documento recurrente.</p></div>{supplier.invoiceCount >= 3 && <StatusBadge status="HISTÓRICO SUFICIENTE"/>}</div>{supplier.invoiceCount >= 3 && !supplier.recurrent && <p className="schedule-suggestion"><Icon name="warning" size={16}/>Hay {supplier.invoiceCount} facturas históricas. Puedes confirmar una recurrencia, pero no se activará sola.</p>}<div className="form-grid"><Field label="Frecuencia"><select value={schedule.frequency} onChange={(event) => setSchedule({ ...schedule, frequency: event.target.value as SupplierFrequency })}><option value="NONE">Sin frecuencia</option><option value="MONTHLY">Mensual</option><option value="QUARTERLY">Trimestral</option><option value="ANNUAL">Anual</option></select></Field><Field label="Día esperado" hint="Opcional; del 1 al 31"><input type="number" min="1" max="31" value={schedule.expectedDay ?? ''} onChange={(event) => setSchedule({ ...schedule, expectedDay: event.target.value ? Number(event.target.value) : undefined })}/></Field>{['QUARTERLY', 'ANNUAL'].includes(schedule.frequency) && <Field label="Mes de referencia" hint="Opcional; úsalo solo si está acreditado"><input type="number" min="1" max="12" value={schedule.anchorMonth ?? ''} onChange={(event) => setSchedule({ ...schedule, anchorMonth: event.target.value ? Number(event.target.value) : undefined })}/></Field>}</div><Field label="Evidencia de frecuencia"><textarea rows={3} value={schedule.evidence} onChange={(event) => setSchedule({ ...schedule, evidence: event.target.value })}/></Field><Button icon="check" disabled={saving} onClick={saveSchedule}>Guardar frecuencia</Button></section>{message && <p className="inline-note" role="status"><Icon name="warning" size={16}/>{message}</p>}</div></Modal>;
+}
+
+function supplierRuleLabel(type: SupplierRuleType) {
+  return ({ EMAIL_DOMAIN: 'DOMINIO', SENDER_EMAIL: 'REMITENTE', BANK_CONCEPT: 'CONCEPTO BANCARIO', DEFAULT_CATEGORY: 'CATEGORÍA', DEFAULT_CURRENCY: 'MONEDA' } as const)[type];
+}
+
 function BankPage({ snapshot, updateSnapshot }: PageProps) {
-  const [preview, setPreview] = useState<BankImport | null>(null); const [working, setWorking] = useState(false); const [form, setForm] = useState({ source: '', periodFrom: '2026-07-01', periodTo: '2026-07-20', coverage: 'Extracto parcial · 1 al 20 de julio de 2026', file: null as File | null });
-  const [mappingInfo, setMappingInfo] = useState<{ headers: string[]; headerRow: number } | null>(null); const [mapping, setMapping] = useState<Record<string, number>>({}); const [importError, setImportError] = useState('');
-  const [discarding, setDiscarding] = useState(false); const [discardReason, setDiscardReason] = useState('');
+  const emptyMapping = (): BankMapping => ({ headerRow: 0, currencyMode: 'COLUMN', rememberProfile: true, profileName: '' });
+  const [preview, setPreview] = useState<BankImport | null>(null);
+  const [working, setWorking] = useState(false);
+  const [form, setForm] = useState({ source: '', periodFrom: '2026-07-01', periodTo: '2026-07-20', coverage: 'Extracto parcial · 1 al 20 de julio de 2026', file: null as File | null });
+  const [mappingInfo, setMappingInfo] = useState<BankMappingRequiredDetails | null>(null);
+  const [mapping, setMapping] = useState<BankMapping>(emptyMapping);
+  const [importError, setImportError] = useState('');
+  const [discarding, setDiscarding] = useState(false);
+  const [discardReason, setDiscardReason] = useState('');
+  const [formatToDeactivate, setFormatToDeactivate] = useState<string | null>(null);
   const bankImport = preview ?? snapshot.bankImports[0];
-  const loadFile = async () => {
+  const mappingReady = mapping.operationDate !== undefined && mapping.concept !== undefined && mapping.amount !== undefined && (mapping.currencyMode === 'EMBEDDED' || (mapping.currencyMode === 'COLUMN' && mapping.currency !== undefined) || (mapping.currencyMode === 'FIXED' && /^[A-Z]{3}$/.test(mapping.fixedCurrency ?? ''))) && (!mapping.rememberProfile || Boolean(mapping.profileName?.trim()));
+  const refreshFormats = async () => { const formats = await api.listBankFormats(); if (formats.ok && formats.data) updateSnapshot({ bankFormats: formats.data }); };
+  const loadFile = async (forceManual = false) => {
     if (!form.file || !form.source || !form.coverage) return; setWorking(true); setImportError('');
     const base64 = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.readAsDataURL(form.file!); });
-    const result = await api.previewBankImport({ fileName: form.file.name, base64, source: form.source, periodFrom: form.periodFrom, periodTo: form.periodTo, coverage: form.coverage, mapping: mappingInfo ? { ...mapping, headerRow: mappingInfo.headerRow } : undefined }); setWorking(false);
-    if (result.ok && result.data) { setPreview(result.data); setMappingInfo(null); setMapping({}); }
-    else { setImportError(result.error?.message ?? 'No se pudo leer el extracto'); if (result.error?.code === 'BANK_MAPPING_REQUIRED' && result.error.details) setMappingInfo(result.error.details as { headers: string[]; headerRow: number }); }
+    const result = await api.previewBankImport({ fileName: form.file.name, base64, source: form.source, periodFrom: form.periodFrom, periodTo: form.periodTo, coverage: form.coverage, mapping: mappingInfo ? { ...mapping, headerRow: mappingInfo.headerRow } : undefined, forceManual }); setWorking(false);
+    if (result.ok && result.data) { setPreview(result.data); setMappingInfo(null); setMapping(emptyMapping()); await refreshFormats(); }
+    else {
+      setImportError(result.error?.message ?? 'No se pudo leer el extracto');
+      if (result.error?.code === 'BANK_MAPPING_REQUIRED' && result.error.details) {
+        const details = result.error.details as BankMappingRequiredDetails;
+        const headers = details.headers.map(normalizeText);
+        const find = (aliases: string[]) => { const index = headers.findIndex((header) => aliases.includes(header)); return index >= 0 ? index : undefined; };
+        setMappingInfo(details);
+        setMapping({ headerRow: details.headerRow, operationDate: find(['fecha', 'fecha operacion', 'f operacion', 'fecha de operacion']), valueDate: find(['fecha valor', 'f valor', 'fecha de valor']), concept: find(['concepto', 'descripcion', 'detalle']), amount: find(['importe', 'cantidad', 'amount']), currency: find(['divisa', 'moneda', 'currency']), reference: find(['referencia', 'referencia 1', 'informacion adicional']), currencyMode: details.suggestedCurrencyMode, fixedCurrency: '', rememberProfile: true, profileName: `${form.source.trim()} ${details.extension.toUpperCase()}`.trim() });
+      }
+    }
   };
   const confirm = async () => { if (!preview) return; setImportError(''); setWorking(true); const result = await api.confirmBankImport(preview); setWorking(false); if (result.ok && result.data) { updateSnapshot({ bankImports: [result.data, ...snapshot.bankImports] }); setPreview(null); } else setImportError(result.error?.message ?? 'No se pudo archivar el extracto'); };
   const discard = async () => { if (!preview || !discardReason.trim()) return; setImportError(''); setWorking(true); const result = await api.cancelBankImport(preview, discardReason.trim()); setWorking(false); if (result.ok && result.data) { updateSnapshot({ bankImports: [result.data, ...snapshot.bankImports.filter((item) => item.id !== result.data!.id)] }); setPreview(null); setDiscarding(false); setDiscardReason(''); } else setImportError(result.error?.message ?? 'No se pudo descartar la vista previa'); };
+  const deactivateFormat = async () => { if (!formatToDeactivate) return; setWorking(true); const result = await api.deactivateBankFormat(formatToDeactivate); setWorking(false); if (result.ok) { updateSnapshot({ bankFormats: snapshot.bankFormats.filter((item) => item.id !== formatToDeactivate) }); setFormatToDeactivate(null); } else setImportError(result.error?.message ?? 'No se pudo desactivar el formato.'); };
   const decide = async (movementId: string, status: string, invoiceId?: string) => { if (!bankImport) return; const result = await api.decideReconciliation(bankImport.id, movementId, status, invoiceId); if (result.ok && result.data) { if (preview) setPreview(result.data); else updateSnapshot({ bankImports: snapshot.bankImports.map((item) => item.id === result.data!.id ? result.data! : item) }); } };
+  const columnField = (key: 'operationDate' | 'concept' | 'amount' | 'valueDate' | 'currency' | 'reference', label: string) => <Field label={label}><select value={mapping[key] ?? ''} onChange={(event) => setMapping({ ...mapping, [key]: event.target.value === '' ? undefined : Number(event.target.value) })}><option value="">Sin asignar</option>{mappingInfo?.headers.map((header, index) => <option key={`${header}-${index}`} value={index}>{header || `Columna ${index + 1}`}</option>)}</select></Field>;
   return <>
     <SectionHeader eyebrow="Control de cobertura" title="Conciliación bancaria" description="Compara evidencias. Una ausencia se informa con su cobertura, sin afirmar el estado del pago."/>
-    <section className="bank-upload"><div className="panel-title"><span>1</span><div><h2>Importar extracto</h2><p>XLSX o CSV · el original se archiva solo al confirmar.</p></div></div><div className="form-grid bank-form"><Field label="Archivo"><input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => { setForm({ ...form, file: e.target.files?.[0] ?? null }); setMappingInfo(null); setImportError(''); }}/></Field><Field label="Cuenta o fuente"><input value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}/></Field><Field label="Desde"><input type="date" value={form.periodFrom} onChange={(e) => setForm({ ...form, periodFrom: e.target.value })}/></Field><Field label="Hasta"><input type="date" value={form.periodTo} onChange={(e) => setForm({ ...form, periodTo: e.target.value })}/></Field><Field label="Cobertura"><input placeholder="Ej. cuenta principal · julio completo" value={form.coverage} onChange={(e) => setForm({ ...form, coverage: e.target.value })}/></Field><Button icon="search" disabled={!form.file || !form.source || !form.coverage || working || Boolean(mappingInfo && (mapping.operationDate === undefined || mapping.concept === undefined || mapping.amount === undefined || mapping.currency === undefined))} onClick={loadFile}>{working ? 'Leyendo…' : mappingInfo ? 'Aplicar mapeo' : 'Previsualizar'}</Button></div>{importError && <p className="inline-note"><Icon name="warning" size={16}/>{importError}</p>}{mappingInfo && <div className="mapping-panel"><div><strong>Mapea las columnas del extracto</strong><p>La aplicación no adivinará un formato desconocido. Selecciona las columnas acreditadas.</p></div>{['operationDate', 'concept', 'amount', 'valueDate', 'currency', 'reference'].map((key) => <Field key={key} label={({ operationDate: 'Fecha operación *', concept: 'Concepto *', amount: 'Importe *', valueDate: 'Fecha valor', currency: 'Moneda *', reference: 'Referencia' } as Record<string, string>)[key]}><select value={mapping[key] ?? ''} onChange={(e) => setMapping({ ...mapping, [key]: Number(e.target.value) })}><option value="">Sin asignar</option>{mappingInfo.headers.map((header, index) => <option key={`${header}-${index}`} value={index}>{header || `Columna ${index + 1}`}</option>)}</select></Field>)}</div>}</section>
-    {bankImport ? <section className="reconciliation"><div className="subhead"><div><p className="eyebrow">{bankImport.status}</p><h2>{bankImport.fileName}</h2><p>{bankImport.source} · {bankImport.coverage} · {bankImport.movementCount} movimientos</p>{bankImport.detectedPeriodFrom && <small className="detected-period">Periodo detectado: {formatDate(bankImport.detectedPeriodFrom)} → {formatDate(bankImport.detectedPeriodTo || '')}</small>}</div>{preview && <div><Button variant="secondary" onClick={() => setDiscarding(true)}>Descartar vista previa</Button><Button icon="archive" disabled={working} onClick={confirm}>Confirmar y archivar</Button></div>}</div>{Boolean(bankImport.warnings?.length) && <div className="warning-stack">{bankImport.warnings!.map((warning) => <p className="inline-note" key={warning}><Icon name="warning" size={16}/>{warning}</p>)}</div>}<div className="reconciliation-summary"><SummaryNumber label="Confirmadas" value={bankImport.movements.filter((item) => item.status === 'COINCIDENCIA CONFIRMADA').length}/><SummaryNumber label="Candidatas" value={bankImport.movements.filter((item) => item.status === 'CANDIDATA PENDIENTE').length}/><SummaryNumber label="Sin factura" value={bankImport.movements.filter((item) => item.status === 'MOVIMIENTO SIN FACTURA').length}/><SummaryNumber label="Excluidas" value={bankImport.movements.filter((item) => item.status.startsWith('EXCLUIDO')).length}/></div><div className="movement-list">{bankImport.movements.map((movement) => { const invoice = snapshot.invoices.find((item) => item.id === movement.candidateInvoiceId); return <article key={movement.id}><div className="movement-date"><strong>{new Date(movement.operationDate).getDate()}</strong><span>{new Intl.DateTimeFormat('es-ES', { month: 'short' }).format(new Date(movement.operationDate))}</span></div><div className="movement-concept"><strong>{movement.concept}</strong><small>{movement.reference || 'Sin referencia'} · {movement.type}</small>{movement.evidence && <p><Icon name="search" size={14}/>{movement.evidence}</p>}</div><div className="movement-amount"><strong>{formatCurrency(movement.amount, movement.currency)}</strong><StatusBadge status={movement.status}/></div>{invoice && <div className="match-card"><span><Icon name="invoice"/></span><div><small>Factura candidata</small><strong>{invoice.supplier}</strong><p>{invoice.number} · {formatCurrency(invoice.total, invoice.currency)}</p></div></div>}<div className="movement-actions">{bankImport.status === 'CONFIRMADA' && movement.status === 'CANDIDATA PENDIENTE' && <><Button variant="quiet" onClick={() => decide(movement.id, 'REVISIÓN MANUAL', invoice?.id)}>Revisar</Button><Button icon="check" onClick={() => decide(movement.id, 'COINCIDENCIA CONFIRMADA', invoice?.id)}>Confirmar</Button></>}</div></article>; })}</div></section> : <EmptyState icon="bank" title="No hay extractos importados">Carga un XLSX o CSV e indica su cobertura para comenzar.</EmptyState>}
+    <section className="bank-upload">
+      <div className="panel-title"><span>1</span><div><h2>Importar extracto</h2><p>XLSX o CSV · el original se archiva solo al confirmar.</p></div></div>
+      <div className="form-grid bank-form"><Field label="Archivo"><input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { setForm({ ...form, file: event.target.files?.[0] ?? null }); setMappingInfo(null); setMapping(emptyMapping()); setImportError(''); }}/></Field><Field label="Cuenta o fuente"><input value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })}/></Field><Field label="Desde"><input type="date" value={form.periodFrom} onChange={(event) => setForm({ ...form, periodFrom: event.target.value })}/></Field><Field label="Hasta"><input type="date" value={form.periodTo} onChange={(event) => setForm({ ...form, periodTo: event.target.value })}/></Field><Field label="Cobertura"><input placeholder="Ej. cuenta principal · julio completo" value={form.coverage} onChange={(event) => setForm({ ...form, coverage: event.target.value })}/></Field><div className="bank-upload__actions"><Button variant="secondary" disabled={!form.file || !form.source || !form.coverage || working || Boolean(mappingInfo)} onClick={() => loadFile(true)}>Mapear manualmente</Button><Button icon="search" disabled={!form.file || !form.source || !form.coverage || working || Boolean(mappingInfo && !mappingReady)} onClick={() => loadFile(false)}>{working ? 'Leyendo…' : mappingInfo ? 'Aplicar mapeo' : 'Previsualizar'}</Button></div></div>
+      {importError && <p className="inline-note" role="alert"><Icon name="warning" size={16}/>{importError}</p>}
+      {mappingInfo && <div className="mapping-panel"><div className="mapping-panel__intro"><strong>Mapear formato bancario</strong><p>Asigna las columnas acreditadas y especifica cómo aparece la moneda. El saldo se ignora.</p><small>{mappingInfo.extension.toUpperCase()} {mappingInfo.separator ? `· separador “${mappingInfo.separator}”` : ''}</small></div>{columnField('operationDate', 'Fecha operación *')}{columnField('concept', 'Concepto *')}{columnField('amount', 'Importe *')}{columnField('valueDate', 'Fecha valor')}{columnField('reference', 'Referencia')}<Field label="Origen de la moneda *"><select value={mapping.currencyMode} onChange={(event) => setMapping({ ...mapping, currencyMode: event.target.value as BankMapping['currencyMode'] })}><option value="COLUMN">Columna independiente</option><option value="EMBEDDED">Integrada en el importe</option><option value="FIXED">Moneda fija</option></select></Field>{mapping.currencyMode === 'COLUMN' && columnField('currency', 'Columna de moneda *')}{mapping.currencyMode === 'FIXED' && <Field label="Moneda fija *" hint="Código ISO de tres letras"><input maxLength={3} placeholder="EUR" value={mapping.fixedCurrency ?? ''} onChange={(event) => setMapping({ ...mapping, fixedCurrency: event.target.value.toUpperCase().replace(/[^A-Z]/g, '') })}/></Field>}<div className="mapping-profile"><label className="switch-label"><input type="checkbox" checked={mapping.rememberProfile ?? false} onChange={(event) => setMapping({ ...mapping, rememberProfile: event.target.checked })}/><span/>Guardar este formato</label>{mapping.rememberProfile && <Field label="Nombre del perfil *"><input maxLength={80} value={mapping.profileName ?? ''} onChange={(event) => setMapping({ ...mapping, profileName: event.target.value })}/></Field>}<button type="button" onClick={() => { setMappingInfo(null); setMapping(emptyMapping()); setImportError(''); }}>Cancelar mapeo</button></div></div>}
+    </section>
+    <section className="bank-formats"><div className="subhead"><div><h2>Formatos bancarios</h2><p>Se aplican únicamente cuando coinciden la fuente y la estructura del archivo.</p></div><span>{snapshot.bankFormats.length} activos</span></div><div className="bank-format-list">{snapshot.bankFormats.map((format) => <article key={format.id}><span className="bank-format-icon"><Icon name="bank"/></span><div><strong>{format.name}</strong><p>{format.extension.toUpperCase()} {format.separator ? `· separador “${format.separator}”` : ''} · moneda {format.currencyMode === 'EMBEDDED' ? 'integrada' : format.currencyMode === 'FIXED' ? format.fixedCurrency : 'en columna'}</p><small>{format.native ? 'Formato integrado y mantenido por la aplicación' : `Fuente: ${format.source}`}</small></div><StatusBadge status={format.native ? 'INTEGRADO' : 'GUARDADO'}/>{!format.native && <Button variant="quiet" disabled={working} onClick={() => setFormatToDeactivate(format.id)}>Desactivar</Button>}</article>)}</div></section>
+    {bankImport ? <section className="reconciliation"><div className="subhead"><div><p className="eyebrow">{bankImport.status}</p><h2>{bankImport.fileName}</h2><p>{bankImport.source} · {bankImport.coverage} · {bankImport.movementCount} movimientos</p>{bankImport.bankFormatName && <span className="format-used"><Icon name="check" size={15}/>Formato aplicado: {bankImport.bankFormatName}</span>}{bankImport.detectedPeriodFrom && <small className="detected-period">Periodo detectado: {formatDate(bankImport.detectedPeriodFrom)} → {formatDate(bankImport.detectedPeriodTo || '')}</small>}</div>{preview && <div><Button variant="secondary" onClick={() => setDiscarding(true)}>Descartar vista previa</Button><Button icon="archive" disabled={working} onClick={confirm}>Confirmar y archivar</Button></div>}</div>{Boolean(bankImport.warnings?.length) && <div className="warning-stack">{bankImport.warnings!.map((warning) => <p className="inline-note" key={warning}><Icon name="warning" size={16}/>{warning}</p>)}</div>}<div className="reconciliation-summary"><SummaryNumber label="Confirmadas" value={bankImport.movements.filter((item) => item.status === 'COINCIDENCIA CONFIRMADA').length}/><SummaryNumber label="Candidatas" value={bankImport.movements.filter((item) => item.status === 'CANDIDATA PENDIENTE').length}/><SummaryNumber label="Sin factura" value={bankImport.movements.filter((item) => item.status === 'MOVIMIENTO SIN FACTURA').length}/><SummaryNumber label="Excluidas" value={bankImport.movements.filter((item) => item.status.startsWith('EXCLUIDO')).length}/></div><div className="movement-list">{bankImport.movements.map((movement) => { const invoice = snapshot.invoices.find((item) => item.id === movement.candidateInvoiceId); return <article key={movement.id}><div className="movement-date"><strong>{new Date(movement.operationDate).getDate()}</strong><span>{new Intl.DateTimeFormat('es-ES', { month: 'short' }).format(new Date(movement.operationDate))}</span></div><div className="movement-concept"><strong>{movement.concept}</strong><small>{movement.reference || 'Sin referencia'} · {movement.type}</small>{movement.evidence && <p><Icon name="search" size={14}/>{movement.evidence}</p>}</div><div className="movement-amount"><strong>{formatCurrency(movement.amount, movement.currency)}</strong><StatusBadge status={movement.status}/></div>{invoice && <div className="match-card"><span><Icon name="invoice"/></span><div><small>Factura candidata</small><strong>{invoice.supplier}</strong><p>{invoice.number} · {formatCurrency(invoice.total, invoice.currency)}</p></div></div>}<div className="movement-actions">{bankImport.status === 'CONFIRMADA' && movement.status === 'CANDIDATA PENDIENTE' && <><Button variant="quiet" onClick={() => decide(movement.id, 'REVISIÓN MANUAL', invoice?.id)}>Revisar</Button><Button icon="check" onClick={() => decide(movement.id, 'COINCIDENCIA CONFIRMADA', invoice?.id)}>Confirmar</Button></>}</div></article>; })}</div></section> : <EmptyState icon="bank" title="No hay extractos importados">Carga un XLSX o CSV e indica su cobertura para comenzar.</EmptyState>}
     {discarding && preview && <Modal title="Descartar vista previa bancaria" onClose={() => setDiscarding(false)}><div className="confirmation confirmation--danger"><span><Icon name="warning" size={28}/></span><h3>El extracto no se archivará</h3><p>Las filas técnicas quedarán canceladas y el archivo temporal podrá recuperarse desde la papelera de Drive.</p><Field label="Motivo obligatorio"><textarea rows={3} value={discardReason} onChange={(event) => setDiscardReason(event.target.value)}/></Field><div className="inline-modal-actions"><Button variant="secondary" onClick={() => setDiscarding(false)}>Volver</Button><Button variant="danger" icon="close" disabled={working || !discardReason.trim()} onClick={discard}>{working ? 'Descartando…' : 'Descartar y enviar temporal a papelera'}</Button></div></div></Modal>}
+    {formatToDeactivate && <Modal title="Desactivar formato bancario" onClose={() => setFormatToDeactivate(null)} footer={<><Button variant="secondary" onClick={() => setFormatToDeactivate(null)}>Cancelar</Button><Button variant="danger" disabled={working} onClick={deactivateFormat}>{working ? 'Desactivando…' : 'Desactivar formato'}</Button></>}><p>La aplicación dejará de aplicar este perfil automáticamente. El historial de importaciones permanecerá intacto.</p></Modal>}
   </>;
 }
 
@@ -345,11 +513,13 @@ function MetricsPage({ snapshot }: PageProps) {
 }
 
 function HistoryPage({ snapshot }: PageProps) {
-  const [query, setQuery] = useState(''); const [page, setPage] = useState(0); const events = snapshot.audit.filter((event) => `${event.action} ${event.object} ${event.detail} ${event.user}`.toLowerCase().includes(query.toLowerCase())); const pageSize = 25; const visibleEvents = events.slice(page * pageSize, (page + 1) * pageSize);
+  const [query, setQuery] = useState(''); const [events, setEvents] = useState(snapshot.audit); const [total, setTotal] = useState(snapshot.auditWindow?.total ?? snapshot.audit.length); const [nextCursor, setNextCursor] = useState(snapshot.auditWindow?.complete === false ? String(snapshot.auditWindow.returned) : undefined); const [loading, setLoading] = useState(false); const [loadError, setLoadError] = useState('');
+  const loadAudit = async (append = false) => { setLoading(true); setLoadError(''); const result = await api.listAudit({ query, cursor: append ? nextCursor : undefined, limit: 50 }); setLoading(false); if (!result.ok || !result.data) { setLoadError(result.error?.message ?? 'No se pudo cargar el historial.'); return; } setEvents((current) => append ? [...current, ...result.data!.items.filter((item) => !current.some((existing) => existing.id === item.id))] : result.data!.items); setTotal(result.data.total); setNextCursor(result.data.nextCursor); };
+  useEffect(() => { const timer = window.setTimeout(() => { void loadAudit(false); }, 250); return () => window.clearTimeout(timer); }, [query]);
   return <>
     <SectionHeader eyebrow="Registro inmutable" title="Historial y auditoría" description="Cada decisión conserva actor, momento, objeto y resultado para poder reconstruir el proceso."/>
-    <div className="table-toolbar"><label className="search-box"><Icon name="search" size={18}/><input placeholder="Buscar acción, lote, documento o usuario" value={query} onChange={(e) => setQuery(e.target.value)}/></label><span>{events.length} eventos</span></div>
-    <div className="audit-list">{visibleEvents.map((event) => <article key={event.id}><span className={`audit-level audit-level--${event.level.toLowerCase()}`}><Icon name={event.level === 'ERROR' ? 'error' : event.level === 'WARN' ? 'warning' : 'check'}/></span><div><header><strong>{event.action.replaceAll('_', ' ')}</strong><StatusBadge status={event.level}/></header><p>{event.detail}</p><footer><span className="mono">{event.object}</span><span>{formatDate(event.timestamp, true)}</span><span>{event.user}</span></footer></div></article>)}</div><Pagination page={page} total={events.length} pageSize={pageSize} onPage={setPage}/>
+    <div className="table-toolbar"><label className="search-box"><Icon name="search" size={18}/><input placeholder="Buscar acción, lote, documento o usuario" value={query} onChange={(e) => setQuery(e.target.value)}/></label><span>Mostrando {events.length} de {total}</span></div>
+    {loadError && <p className="inline-note" role="alert"><Icon name="error" size={16}/>{loadError}</p>}<div className="audit-list">{events.map((event) => <article key={event.id}><span className={`audit-level audit-level--${event.level.toLowerCase()}`}><Icon name={event.level === 'ERROR' ? 'error' : event.level === 'WARN' ? 'warning' : 'check'}/></span><div><header><strong>{event.action.replaceAll('_', ' ')}</strong><StatusBadge status={event.level}/></header><p>{event.detail}</p><footer><span className="mono">{event.object}</span><span>{formatDate(event.timestamp, true)}</span><span>{event.user}</span></footer></div></article>)}</div>{nextCursor && <div className="candidate-pagination"><span>Quedan {Math.max(total - events.length, 0)} eventos</span><Button variant="secondary" icon="refresh" disabled={loading} onClick={() => loadAudit(true)}>{loading ? 'Cargando…' : 'Cargar más'}</Button></div>}
   </>;
 }
 
@@ -381,7 +551,10 @@ function ReviewPageV18({ snapshot, updateSnapshot }: PageProps) {
       }));
     } catch (_) { return {}; }
   });
-  const [selectedId, setSelectedId] = useState(documents[0]?.id ?? '');
+  const reviewFocus = useMemo(() => readNavigationFocus('review'), []);
+  const [selectedId, setSelectedId] = useState(documents.some((item) => item.id === reviewFocus?.entityId) ? reviewFocus!.entityId! : documents[0]?.id ?? '');
+  const [approvalSelection, setApprovalSelection] = useState<string[]>([]);
+  const [confirmBulkApproval, setConfirmBulkApproval] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [preview, setPreview] = useState<{ name: string; url: string; gmailUrl?: string } | null>(null);
@@ -425,12 +598,13 @@ function ReviewPageV18({ snapshot, updateSnapshot }: PageProps) {
   };
   const saveIds = async (ids: string[]) => {
     const items = ids.map((id) => drafts[id]).filter(Boolean).slice(0, 20);
-    if (!items.length) { setMessage('No hay cambios pendientes.'); return; }
-    if (items.some((item) => !item.reason.trim())) { setMessage('Todos los cambios necesitan un motivo antes de guardarse.'); return; }
+    const omitted = Math.max(ids.length - items.length, 0);
+    if (!items.length) { setMessage('No hay cambios pendientes.'); return false; }
+    if (items.some((item) => !item.reason.trim())) { setMessage('Todos los cambios necesitan un motivo antes de guardarse.'); return false; }
     setSaving(true); setMessage('');
     const result = await api.saveDocuments(items);
     setSaving(false);
-    if (!result.ok || !result.data) { setMessage(result.error?.message ?? 'No se pudieron guardar las decisiones.'); return; }
+    if (!result.ok || !result.data) { setMessage(result.error?.message ?? 'No se pudieron guardar las decisiones.'); return false; }
     const saved = result.data.items.filter((item) => item.ok && item.document).map((item) => item.document!);
     syncSaved(saved);
     setDrafts((current) => {
@@ -439,7 +613,14 @@ function ReviewPageV18({ snapshot, updateSnapshot }: PageProps) {
       return next;
     });
     const conflicts = result.data.items.filter((item) => item.error?.code === 'REVIEW_CONFLICT').length;
-    setMessage(`${result.data.saved} guardadas${result.data.failed ? ` · ${result.data.failed} pendientes de reintento` : ''}${conflicts ? ` · ${conflicts} conflictos por cambios concurrentes` : ''} · ${result.data.durationMs} ms`);
+    setMessage(`${result.data.saved} guardadas${result.data.failed ? ` · ${result.data.failed} pendientes de reintento` : ''}${conflicts ? ` · ${conflicts} conflictos por cambios concurrentes` : ''}${omitted ? ` · quedan ${omitted} para el siguiente guardado` : ''} · ${result.data.durationMs} ms`);
+    return result.data.failed === 0;
+  };
+  const saveAndNext = async () => {
+    if (!selected) return;
+    const index = documents.findIndex((item) => item.id === selected.id);
+    const saved = await saveIds([selected.id]);
+    if (saved) setSelectedId(documents[(index + 1) % documents.length]?.id ?? selected.id);
   };
   const approve = async () => {
     if (!selected) return;
@@ -451,6 +632,30 @@ function ReviewPageV18({ snapshot, updateSnapshot }: PageProps) {
     setDrafts((current) => { const next = { ...current }; delete next[selected.id]; return next; });
     setSelectedId(reviewDocuments[0]?.id ?? '');
   };
+  const approveSelected = async () => {
+    if (!approvalSelection.length) return;
+    if (approvalSelection.length > 20) { setConfirmBulkApproval(false); setMessage('Selecciona como máximo 20 documentos por aprobación conjunta.'); return; }
+    setSaving(true); setMessage('');
+    const result = await api.approveDocuments(approvalSelection.slice(0, 20));
+    setSaving(false);
+    setConfirmBulkApproval(false);
+    if (!result.ok || !result.data) { setMessage(result.error?.message ?? 'No se pudo ejecutar la aprobación conjunta.'); return; }
+    const finalized = result.data.items.filter((item) => item.ok && item.document).map((item) => item.document!);
+    const finalizedIds = new Set(finalized.map((item) => item.id));
+    if (finalizedIds.size) {
+      const reviewDocuments = snapshot.reviewDocuments.filter((item) => !finalizedIds.has(item.id));
+      const activeBatch = snapshot.activeBatch ? { ...snapshot.activeBatch, documents: snapshot.activeBatch.documents.map((item) => finalized.find((saved) => saved.id === item.id) ?? item) } : null;
+      updateSnapshot({ activeBatch, reviewDocuments, reviewCount: reviewDocuments.length });
+      setApprovalSelection((current) => current.filter((id) => !finalizedIds.has(id)));
+      setSelectedId(reviewDocuments[0]?.id ?? documents.find((item) => !finalizedIds.has(item.id))?.id ?? '');
+    }
+    const failed = result.data.failed;
+    setMessage(`${finalized.length} documentos aprobados${failed ? ` · ${failed} no se pudieron aprobar` : ''}.`);
+  };
+  const selectedForApproval = documents.filter((item) => approvalSelection.includes(item.id));
+  const approvalDestination = (document: InvoiceDocument) => document.proposedStatus === 'PROCESADA' && document.invoiceDate
+    ? [snapshot.settings.invoiceFolderName, ...invoiceArchivePath(document.invoiceDate), formatInvoiceFileName(document)].join(' / ')
+    : `ReparaPRO Docs / FACTURAS · ${document.proposedStatus}`;
   const openPreview = async () => {
     if (!selected || previewLoading) return;
     setPreviewLoading(true); setMessage('');
@@ -476,9 +681,9 @@ function ReviewPageV18({ snapshot, updateSnapshot }: PageProps) {
   const matchedSupplier = selected ? snapshot.suppliers.find((item) => item.active && item.id === selected.supplierId) : undefined;
 
   return <>
-    <SectionHeader eyebrow="Control humano · revisión rápida" title="Revisión manual" description="La clasificación manual se conserva aunque falten datos. Guardar una decisión nunca aprueba la factura." action={dirtyCount > 0 ? <Button icon="check" disabled={saving} onClick={() => saveIds(Object.keys(drafts))}>{saving ? 'Guardando…' : `Guardar todas (${dirtyCount})`}</Button> : undefined}/>
+    <SectionHeader eyebrow="Control humano · revisión rápida" title="Revisión manual" description="La clasificación manual se conserva aunque falten datos. Guardar una decisión nunca aprueba la factura." action={<>{approvalSelection.length > 0 && <Button variant="secondary" icon="archive" disabled={saving} onClick={() => setConfirmBulkApproval(true)}>{`Aprobar seleccionadas (${approvalSelection.length})`}</Button>}{dirtyCount > 0 && <Button icon="check" disabled={saving} onClick={() => saveIds(Object.keys(drafts))}>{saving ? 'Guardando…' : `Guardar todas (${dirtyCount})`}</Button>}</>}/>
     {!documents.length ? <EmptyState icon="check" title="No hay revisiones pendientes">Los resultados finalizados siguen disponibles en Facturas.</EmptyState> : <section className="review-layout review-layout--v18">
-      <div className="review-list"><div className="list-toolbar"><strong>{documents.length} pendientes</strong><span>{dirtyCount} sin guardar</span></div>{documents.map((source) => { const doc = drafts[source.id]?.document ?? source; return <button key={doc.id} className={(selected?.id === doc.id ? 'is-active ' : '') + (drafts[doc.id] ? 'is-dirty' : '')} onClick={() => { setSelectedId(doc.id); setMessage(''); }}><span className="file-token"><Icon name="file"/></span><div><strong>{doc.originalName}</strong><p>{doc.supplier || 'Proveedor sin asociar'}</p><small>{activeReviewDecision(doc)?.label ?? doc.proposedStatus}</small>{drafts[doc.id] && <em>Sin guardar</em>}</div><Icon name="chevron" size={17}/></button>; })}</div>
+      <div className="review-list"><div className="list-toolbar"><strong>{documents.length} pendientes</strong><span>{dirtyCount} sin guardar</span></div>{documents.map((source) => { const doc = drafts[source.id]?.document ?? source; const approvable = doc.phase === 'LISTO PARA APROBAR' && !drafts[doc.id]; return <div key={doc.id} className={(selected?.id === doc.id ? 'is-active ' : '') + (drafts[doc.id] ? 'is-dirty' : '')}><label className="review-select" title={approvable ? 'Seleccionar para aprobación conjunta' : 'Guarda y resuelve los bloqueos antes de seleccionar'}><input type="checkbox" aria-label={`Seleccionar ${doc.originalName} para aprobar`} disabled={!approvable} checked={approvalSelection.includes(doc.id)} onChange={(event) => setApprovalSelection((current) => event.target.checked ? [...new Set([...current, doc.id])] : current.filter((id) => id !== doc.id))}/><span/></label><button onClick={() => { setSelectedId(doc.id); setMessage(''); }}><span className="file-token"><Icon name="file"/></span><div><strong>{doc.originalName}</strong><p>{doc.supplier || 'Proveedor sin asociar'}</p><small>{activeReviewDecision(doc)?.label ?? doc.proposedStatus}</small>{drafts[doc.id] && <em>Sin guardar</em>}</div><Icon name="chevron" size={17}/></button></div>; })}</div>
       {selected && <div className="review-detail"><div className="review-detail__head"><div><p className="eyebrow">Documento · {selected.id}</p><h2>{selected.originalName}</h2><p>{selected.subject}</p></div><div className="review-detail__source-actions"><Button variant="secondary" icon="eye" disabled={previewLoading} onClick={openPreview}>{previewLoading ? 'Cargando…' : 'Previsualizar PDF'}</Button>{selected.gmailUrl && <a className="button button--secondary" href={selected.gmailUrl} target="_blank" rel="noreferrer"><Icon name="mail" size={17}/>Abrir correo</a>}</div></div>
         <EvidenceChain active={3}/>
         <div className="review-grid review-grid--enriched">
@@ -500,16 +705,84 @@ function ReviewPageV18({ snapshot, updateSnapshot }: PageProps) {
         <p className="decision-feedback" role="status"><Icon name="check" size={17}/><span><strong>Decisión preparada:</strong> {activeReviewDecision(selected)?.label}{selected.nonRegularSupplier ? ' · Proveedor no habitual' : ''}. Se aplicará al guardar.</span></p>
         {Boolean(selected.validationErrors?.length) && <div className="validation-panel" role="alert"><strong>Datos que bloquean la aprobación</strong><ul>{selected.validationErrors!.map((error) => <li key={error}>{error}</li>)}</ul></div>}
         {message && <p className="inline-note" role="status"><Icon name="warning" size={16}/>{message}</p>}
-        <div className="review-actions"><Button variant="secondary" disabled={!drafts[selected.id] || saving} onClick={() => { setDrafts((current) => { const next = { ...current }; delete next[selected.id]; return next; }); setMessage('Cambios descartados.'); }}>Descartar cambios</Button><Button aria-label="Guardar decisión" icon="check" disabled={!drafts[selected.id] || saving} onClick={() => saveIds([selected.id])}>{saving ? 'Guardando…' : 'Guardar esta decisión'}</Button>{selected.phase === 'LISTO PARA APROBAR' && !drafts[selected.id] && <Button icon="archive" onClick={approve}>Aprobar documento</Button>}</div>
+        <div className="review-actions"><Button variant="secondary" disabled={!drafts[selected.id] || saving} onClick={() => { setDrafts((current) => { const next = { ...current }; delete next[selected.id]; return next; }); setMessage('Cambios descartados.'); }}>Descartar cambios</Button><Button variant="secondary" aria-label="Guardar decisión" icon="check" disabled={!drafts[selected.id] || saving} onClick={() => saveIds([selected.id])}>{saving ? 'Guardando…' : 'Guardar esta decisión'}</Button><Button icon="arrow" disabled={!drafts[selected.id] || saving} onClick={saveAndNext}>{saving ? 'Guardando…' : 'Guardar y abrir siguiente'}</Button>{selected.phase === 'LISTO PARA APROBAR' && !drafts[selected.id] && <Button icon="archive" onClick={approve}>Aprobar documento</Button>}</div>
       </div>}
     </section>}
     {preview && <Modal title={`Vista previa · ${preview.name}`} size="wide" onClose={() => setPreview(null)} footer={<><a className="button button--secondary" href={preview.url} target="_blank" rel="noreferrer"><Icon name="eye" size={17}/>Abrir en otra pestaña</a>{preview.gmailUrl && <a className="button button--secondary" href={preview.gmailUrl} target="_blank" rel="noreferrer"><Icon name="mail" size={17}/>Ver correo de origen</a>}<Button onClick={() => setPreview(null)}>Cerrar</Button></>}><div className="pdf-preview"><iframe title={`PDF ${preview.name}`} src={preview.url}/></div></Modal>}
     {supplierDraft && selected && <Modal title="Crear proveedor desde este documento" onClose={() => !saving && setSupplierDraft(null)} footer={<><Button variant="secondary" disabled={saving} onClick={() => setSupplierDraft(null)}>Cancelar</Button><Button icon="check" disabled={saving || !supplierConfirmed || !supplierDraft.name.trim() || !supplierDraft.evidence.trim()} onClick={createSupplier}>{saving ? 'Creando…' : 'Crear y asociar'}</Button></>}><div className="form-stack"><div className="source-evidence-card"><span><Icon name="search" size={18}/></span><div><strong>Fuente de los datos</strong><p>{selected.originalName} · {selected.sender}</p><small>Crear el proveedor no aprueba la factura.</small></div></div><Field label="Nombre canónico"><input autoFocus value={supplierDraft.name} onChange={(event) => setSupplierDraft({ ...supplierDraft, name: event.target.value })}/></Field><div className="form-grid"><Field label="Dominio confirmado"><input value={supplierDraft.domain} onChange={(event) => setSupplierDraft({ ...supplierDraft, domain: event.target.value.toLowerCase() })}/></Field><Field label="CIF / NIF"><input value={supplierDraft.taxId} onChange={(event) => setSupplierDraft({ ...supplierDraft, taxId: event.target.value.toUpperCase() })}/></Field></div><Field label="Aliases acreditados"><input value={supplierDraft.aliases.join('; ')} onChange={(event) => setSupplierDraft({ ...supplierDraft, aliases: event.target.value.split(';').map((value) => value.trim()).filter(Boolean) })}/></Field><Field label="Evidencia" hint="Documento y fragmento concreto que acreditan los datos"><textarea rows={3} value={supplierDraft.evidence} onChange={(event) => setSupplierDraft({ ...supplierDraft, evidence: event.target.value })}/></Field><label className="evidence-confirmation"><input type="checkbox" checked={supplierConfirmed} onChange={(event) => setSupplierConfirmed(event.target.checked)}/><span><strong>He comprobado los datos</strong><small>Los datos introducidos aparecen en el PDF o correo.</small></span></label></div></Modal>}
+    {confirmBulkApproval && <Modal title="Confirmar aprobación conjunta" onClose={() => !saving && setConfirmBulkApproval(false)} footer={<><Button variant="secondary" disabled={saving} onClick={() => setConfirmBulkApproval(false)}>Volver</Button><Button icon="archive" disabled={saving} onClick={approveSelected}>{saving ? 'Archivando…' : `Aprobar ${selectedForApproval.length} documentos`}</Button></>}><div className="bulk-approval-confirm"><p><Icon name="shield" size={18}/><span>Esta acción escribe en Drive y Sheets mediante una única operación bloqueada. Gmail permanecerá intacto.</span></p><ul>{selectedForApproval.map((document) => <li key={document.id}><div><strong>{document.originalName}</strong><span>{document.supplier} · {document.total === null ? 'Sin importe' : formatCurrency(document.total, document.currency)}</span></div><small>{approvalDestination(document)}</small></li>)}</ul></div></Modal>}
   </>;
 }
 
 function BankPageV18(props: PageProps) {
-  return <><BankPage {...props}/><ReconciliationMatrix {...props}/></>;
+  return <><BankPage {...props}/><ReconciliationInbox {...props}/><ReconciliationMatrix {...props}/></>;
+}
+
+const reconciliationTabs: { status: ReconciliationCandidateStatus; label: string }[] = [
+  { status: 'PENDING', label: 'Por revisar' },
+  { status: 'COMPLEX', label: 'Casos complejos' },
+  { status: 'CONFIRMED', label: 'Confirmadas' },
+  { status: 'EXCLUDED', label: 'Excluidas' },
+];
+
+function ReconciliationInbox({ snapshot, updateSnapshot }: PageProps) {
+  const bankFocus = useMemo(() => readNavigationFocus('bank'), []);
+  const [tab, setTab] = useState<ReconciliationCandidateStatus>('PENDING');
+  const [candidates, setCandidates] = useState<ReconciliationCandidate[]>(snapshot.reconciliationCandidates ?? []);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [reason, setReason] = useState('');
+  const [loading, setLoading] = useState(!snapshot.reconciliationCandidates);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [importId, setImportId] = useState(snapshot.bankImports.some((item) => item.id === bankFocus?.importId) ? bankFocus!.importId! : '');
+  const [nextCursor, setNextCursor] = useState<string | undefined>();
+  const [candidateTotal, setCandidateTotal] = useState(snapshot.reconciliationCandidates?.filter((item) => item.status === 'PENDING').length ?? 0);
+  const loadCandidates = async (append = false) => {
+    setLoading(true); setError('');
+    const result = await api.listReconciliationCandidates({ importId: importId || undefined, status: tab, cursor: append ? nextCursor : undefined, limit: 50 });
+    setLoading(false);
+    if (result.ok && result.data) {
+      const otherStatuses = candidates.filter((item) => item.status !== tab);
+      const currentTab = append ? candidates.filter((item) => item.status === tab) : [];
+      const mergedTab = [...currentTab, ...result.data.items.filter((item) => !currentTab.some((current) => current.id === item.id))];
+      setCandidates([...otherStatuses, ...mergedTab]); setNextCursor(result.data.nextCursor); setCandidateTotal(result.data.total);
+    } else setError(result.error?.message ?? 'No se pudieron cargar las propuestas.');
+  };
+  useEffect(() => { setNextCursor(undefined); void loadCandidates(false); setSelectedIds([]); setMessage(''); }, [tab, importId]);
+  const visible = candidates.filter((item) => item.status === tab && (!importId || item.importId === importId));
+  const bulkCandidates = visible.filter((item) => item.canBulkDecide);
+  const toggleAll = (checked: boolean) => setSelectedIds(checked ? bulkCandidates.map((item) => item.id) : []);
+  const decide = async (decision: 'CONFIRM' | 'REJECT') => {
+    const chosen = candidates.filter((item) => selectedIds.includes(item.id));
+    if (!chosen.length) return;
+    if (decision === 'REJECT' && !reason.trim()) { setMessage('Indica por qué rechazas estas propuestas.'); return; }
+    const items: ReconciliationDecisionItem[] = chosen.map((item) => ({ candidateId: item.id, movementId: item.movement.id, invoiceId: item.invoice?.id, decision, allocatedAmount: item.assignedAmount > 0 ? item.assignedAmount : undefined, reason: reason.trim(), evidence: item.evidence.map((evidence) => `${evidence.label}: ${evidence.detail}`).join('; ') }));
+    setSaving(true); setMessage(''); setError('');
+    const result = await api.saveReconciliationDecisions(items);
+    setSaving(false);
+    if (!result.ok || !result.data) { setError(result.error?.message ?? 'No se pudieron guardar las decisiones.'); return; }
+    const savedMovements = new Set(result.data.results.filter((item) => item.status === 'SAVED').map((item) => item.movementId));
+    const next = candidates.map((candidate) => savedMovements.has(candidate.movement.id) ? { ...candidate, status: decision === 'CONFIRM' ? 'CONFIRMED' as const : 'EXCLUDED' as const, safeStatusLabel: decision === 'CONFIRM' ? 'COINCIDENCIA CONFIRMADA' : 'SIN COINCIDENCIA EN ESTA COBERTURA', canBulkDecide: false } : candidate);
+    setCandidates(next); updateSnapshot({ reconciliationCandidates: next }); setSelectedIds([]); setReason('');
+    setMessage(`${result.data.saved} decisiones guardadas${result.data.failed ? ` · ${result.data.failed} pendientes de reintento` : ''}.`);
+  };
+  const decideOne = async (candidate: ReconciliationCandidate, decision: 'CONFIRM' | 'REJECT') => {
+    const decisionReason = decision === 'REJECT' ? window.prompt('Motivo obligatorio para rechazar esta propuesta')?.trim() : '';
+    if (decision === 'REJECT' && !decisionReason) return;
+    setSaving(true); setError(''); setMessage('');
+    const result = await api.saveReconciliationDecisions([{ candidateId: candidate.id, movementId: candidate.movement.id, invoiceId: candidate.invoice?.id, decision, allocatedAmount: candidate.assignedAmount > 0 ? candidate.assignedAmount : undefined, reason: decisionReason, evidence: candidate.evidence.map((item) => `${item.label}: ${item.detail}`).join('; ') }]);
+    setSaving(false);
+    if (!result.ok || !result.data || !result.data.saved) { setError(result.error?.message ?? result.data?.results[0]?.error ?? 'No se pudo guardar la decisión.'); return; }
+    const updated = candidates.map((item) => item.id === candidate.id ? { ...item, status: decision === 'CONFIRM' ? 'CONFIRMED' as const : 'EXCLUDED' as const, safeStatusLabel: decision === 'CONFIRM' ? 'COINCIDENCIA CONFIRMADA' : 'SIN COINCIDENCIA EN ESTA COBERTURA', canBulkDecide: false } : item);
+    setCandidates(updated); updateSnapshot({ reconciliationCandidates: updated }); setMessage('Decisión guardada.');
+  };
+  return <section className="reconciliation-inbox"><div className="subhead"><div><p className="eyebrow">Decisión humana</p><h2>Bandeja de propuestas</h2><p>Compara cada factura con su movimiento. La confianza explica la sugerencia; nunca la confirma.</p></div><Field label="Extracto"><select value={importId} onChange={(event) => setImportId(event.target.value)}><option value="">Todas las fuentes confirmadas</option>{snapshot.bankImports.filter((item) => item.status === 'CONFIRMADA').map((item) => <option key={item.id} value={item.id}>{item.source} · {item.coverage}</option>)}</select></Field></div><div className="reconciliation-tabs" role="tablist" aria-label="Estados de conciliación">{reconciliationTabs.map((item) => <button role="tab" aria-selected={tab === item.status} className={tab === item.status ? 'is-active' : ''} key={item.status} onClick={() => setTab(item.status)}>{item.label}<span>{candidates.filter((candidate) => candidate.status === item.status).length}</span></button>)}</div>{tab === 'PENDING' && <div className="bulk-decision"><label className="bulk-select"><input type="checkbox" aria-label="Seleccionar todas las propuestas inequívocas" checked={bulkCandidates.length > 0 && bulkCandidates.every((item) => selectedIds.includes(item.id))} onChange={(event) => toggleAll(event.target.checked)}/><span>Seleccionar propuestas inequívocas</span></label><Field label="Motivo para rechazar"><input value={reason} placeholder="Obligatorio al rechazar" onChange={(event) => setReason(event.target.value)}/></Field><Button variant="secondary" disabled={saving || !selectedIds.length || !reason.trim()} onClick={() => decide('REJECT')}>Rechazar seleccionadas</Button><Button icon="check" disabled={saving || !selectedIds.length} onClick={() => decide('CONFIRM')}>{saving ? 'Guardando…' : `Confirmar seleccionadas (${selectedIds.length})`}</Button></div>}{error && <div className="inbox-error" role="alert"><Icon name="error" size={18}/><span>{error}</span><Button variant="quiet" icon="refresh" onClick={() => loadCandidates(false)}>Reintentar</Button></div>}{message && <p className="inline-note" role="status"><Icon name="check" size={16}/>{message}</p>}{loading && !visible.length ? <div className="candidate-loading" aria-label="Cargando propuestas">{Array.from({ length: 3 }, (_, index) => <span key={index}/>)}</div> : visible.length ? <><div className="candidate-table"><div className="candidate-table__head"><span/><span>Factura</span><span>Evidencias</span><span>Movimiento propuesto</span><span>Diferencia</span><span>Decisión</span></div>{visible.map((candidate) => <ReconciliationCandidateRow key={candidate.id} candidate={candidate} checked={selectedIds.includes(candidate.id)} onCheck={(checked) => setSelectedIds((current) => checked ? [...new Set([...current, candidate.id])] : current.filter((id) => id !== candidate.id))} onDecide={(decision) => decideOne(candidate, decision)} onOpenMatrix={() => document.querySelector('.reconciliation-matrix')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}/>)}</div><div className="candidate-pagination"><span>Mostrando {visible.length} de {candidateTotal}</span>{nextCursor && <Button variant="secondary" icon="refresh" disabled={loading} onClick={() => loadCandidates(true)}>{loading ? 'Cargando…' : 'Cargar más'}</Button>}</div></> : <EmptyState icon={tab === 'CONFIRMED' ? 'check' : 'bank'} title={`No hay propuestas en ${reconciliationTabs.find((item) => item.status === tab)?.label.toLowerCase()}`}>Cambia de pestaña o importa un extracto con cobertura acreditada.</EmptyState>}<p className="coverage-safety"><Icon name="shield" size={16}/><span>Una ausencia se muestra como <strong>SIN COINCIDENCIA EN ESTA COBERTURA</strong>. Un vencimiento sin evidencia bancaria se muestra como <strong>PAGO NO CONFIRMADO</strong>.</span></p></section>;
+}
+
+function ReconciliationCandidateRow({ candidate, checked, onCheck, onDecide, onOpenMatrix }: { candidate: ReconciliationCandidate; checked: boolean; onCheck: (checked: boolean) => void; onDecide: (decision: 'CONFIRM' | 'REJECT') => void; onOpenMatrix: () => void }) {
+  const overdue = Boolean(candidate.invoice?.dueDate && candidate.invoice.dueDate < new Date().toISOString().slice(0, 10) && candidate.status !== 'CONFIRMED');
+  return <article className={`candidate-row candidate-row--${candidate.confidence.toLowerCase()}`}><label className="candidate-check"><input type="checkbox" aria-label={`Seleccionar propuesta ${candidate.movement.concept}`} disabled={!candidate.canBulkDecide} checked={checked} onChange={(event) => onCheck(event.target.checked)}/><span/></label><div className="candidate-invoice">{candidate.invoice ? <><strong>{candidate.invoice.supplier}</strong><span>{candidate.invoice.number || 'Sin número'} · {formatDate(candidate.invoice.date)}</span><b>{formatCurrency(candidate.invoice.total, candidate.invoice.currency)}</b>{overdue && <StatusBadge status="PAGO NO CONFIRMADO"/>}</> : <><strong>Sin factura candidata</strong><span>No se ha localizado un documento dentro de la cobertura.</span><StatusBadge status="SIN COINCIDENCIA EN ESTA COBERTURA"/></>}</div><div className="candidate-evidence"><StatusBadge status={`CONFIANZA ${candidate.confidence}`}/>{candidate.evidence.map((item) => <span key={`${item.kind}-${item.detail}`} className={item.matched ? 'is-match' : 'is-miss'}><Icon name={item.matched ? 'check' : 'warning'} size={14}/><b>{item.label}</b> · {item.detail}</span>)}</div><div className="candidate-movement"><strong>{candidate.movement.concept}</strong><span>{formatDate(candidate.movement.operationDate)} · {candidate.movement.reference || 'Sin referencia'}</span><b>{formatCurrency(candidate.movement.amount, candidate.movement.currency)}</b><small>{candidate.movement.type}</small></div><div className="candidate-difference"><span>Diferencia</span><strong>{formatCurrency(candidate.difference, candidate.movement.currency)}</strong><small>Asignado {formatCurrency(candidate.assignedAmount, candidate.movement.currency)}</small></div><div className="candidate-decision"><StatusBadge status={candidate.safeStatusLabel}/>{candidate.status === 'COMPLEX' && <Button variant="quiet" onClick={onOpenMatrix}>Abrir matriz</Button>}{candidate.status === 'PENDING' && <div className="candidate-individual-actions"><Button variant="quiet" onClick={() => onDecide('REJECT')}>Rechazar</Button>{candidate.invoice && <Button variant="quiet" icon="check" onClick={() => onDecide('CONFIRM')}>Confirmar</Button>}</div>}</div></article>;
 }
 
 function ReconciliationMatrix({ snapshot, updateSnapshot }: PageProps) {
@@ -569,7 +842,8 @@ function ReconciliationMatrix({ snapshot, updateSnapshot }: PageProps) {
 }
 
 function MonthlyClosePage({ snapshot, updateSnapshot }: PageProps) {
-  const initialPeriod = new Date().toISOString().slice(0, 7);
+  const closeFocus = useMemo(() => readNavigationFocus('close'), []);
+  const initialPeriod = closeFocus?.period && /^\d{4}-\d{2}$/.test(closeFocus.period) ? closeFocus.period : new Date().toISOString().slice(0, 7);
   const [period, setPeriod] = useState(initialPeriod);
   const [close, setClose] = useState<MonthlyClose | null>(null);
   const [loading, setLoading] = useState(false);

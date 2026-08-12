@@ -1,8 +1,8 @@
 # DESIGN.md · Gestión de facturas para MicroPymes
 
-**Producto**: herramienta móvil de gestión de facturas de gasto
+**Producto**: aplicación web responsive de gestión de facturas de gasto
 
-**Plataforma**: móvil, iOS y Android
+**Plataforma**: navegador de escritorio y móvil; añadible a la pantalla de inicio, sin modo offline
 
 **Público**: responsables de administración y contabilidad de microempresas
 
@@ -14,7 +14,7 @@
 - **Control humano visible.** Ningún documento dudoso se archiva sin una decisión explícita.
 - **Estados reconocibles.** Cada estado combina texto, color e icono.
 - **Trazabilidad.** El PDF y el correo de origen permanecen accesibles desde el detalle.
-- **Uso con una mano.** Las acciones principales están cerca de la zona inferior y tienen objetivos táctiles amplios.
+- **Uso adaptable.** La navegación lateral de escritorio se convierte en navegación inferior móvil, manteniendo objetivos táctiles amplios.
 
 ## Pantallas seleccionadas
 
@@ -73,6 +73,22 @@ No se usan degradados ni fondos ornamentales. El blanco mantiene la interfaz lim
 
 ## Componentes
 
+### Mesa semanal
+
+La tarea principal se organiza como una secuencia estable de cuatro pasos: **Capturar**, **Validar**, **Conciliar** y **Cerrar**. La interfaz muestra el paso actual, lo pendiente y la siguiente acción disponible, sin ocultar incidencias ni permitir que el cierre se confunda con una revisión incompleta.
+
+### Mapa de cobertura multifuente
+
+La cobertura se presenta por fuente y periodo para distinguir con claridad que se ha consultado, que falta y que requiere atencion. Un resumen global nunca sustituye el desglose por fuente; los vacios de cobertura se muestran como estado verificable, no como ausencia silenciosa de resultados.
+
+### Bandeja de conciliacion
+
+La conciliacion usa una bandeja de trabajo que agrupa coincidencias propuestas, diferencias y elementos sin pareja. Cada fila conserva acceso a ambas evidencias, explica el motivo de la propuesta y permite confirmar o descartar de forma individual antes de aplicar acciones en lote.
+
+### Estados seguros
+
+Los estados distinguen como minimo entre **pendiente**, **requiere revision**, **confirmado** y **descartado**. Toda transicion sensible es explicita, reversible cuando sea posible y deja trazabilidad. La interfaz no interpreta silencio, falta de evidencia o cobertura parcial como confirmacion.
+
 ### Botones
 
 - **Primario**: fondo `primary`, texto blanco y verbo de acción directo.
@@ -94,7 +110,7 @@ No se usan degradados ni fondos ornamentales. El blanco mantiene la interfaz lim
 
 ### Navegación
 
-La barra inferior mantiene cuatro destinos estables: **Facturas**, **Proveedores**, **Conciliación** y **Actividad**. La pestaña activa usa `primary`; las demás usan `text-secondary`.
+En escritorio se usa navegación lateral completa. En móvil la barra inferior mantiene cinco destinos: **Inicio**, **Procesar**, **Revisión**, **Facturas** y **Más**. La pestaña activa usa `primary`; las demás usan `text-secondary`.
 
 ## Tono de interfaz
 
@@ -113,6 +129,6 @@ La barra inferior mantiene cuatro destinos estables: **Facturas**, **Proveedores
 - Tipografía legible al tamaño real de pantalla.
 - Controles táctiles de al menos 44 × 44 px.
 
-## Restricciones para generar pantallas
+## Verificación de pantallas
 
-Cada pantalla debe generarse como una imagen móvil vertical de alta fidelidad, sin marco de dispositivo, manos, escenario exterior, código ni marca de agua. Todas deben respetar este archivo para mantener una única familia visual.
+Cada cambio de interfaz se comprueba al menos en escritorio y móvil reales. El mapa de cobertura debe mostrar todas las fuentes y periodos sin depender de desplazamiento horizontal oculto, y la primera vista debe priorizar una única acción recomendada.

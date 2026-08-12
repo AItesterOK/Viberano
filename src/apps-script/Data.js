@@ -136,6 +136,7 @@ function setupSchema_(user, requestId) {
     const config = getConfigMap_();
     if (config[row[0]] === undefined || config[row[0]] === '') upsertConfig_(row[0], row[1], row[2]);
   });
+  upsertConfig_('APP_VERSION', APP.VERSION, 'Versión de ReparaPRO Gastos');
   if (!getRows_(APP.SHEETS.CATEGORIES).length) {
     DEFAULT_CATEGORIES.forEach(function (name) {
       appendObject_(APP.SHEETS.CATEGORIES, { CATEGORIA_ID: 'CAT-' + uuid_(), NOMBRE: name, ACTIVA: true, PROVEEDORES_JSON: '[]', ACTUALIZADO_EN: nowIso_(), ACTUALIZADO_POR: user, REQUEST_ID: requestId });
@@ -159,10 +160,14 @@ function activeProviders_() {
 }
 
 function providerFromRow_(row) {
+  const frequency = String(row.FRECUENCIA_ESPERADA || 'NONE').toUpperCase();
   return {
     id: String(row.ID_PROVEEDOR || ('legacy-' + row.__row)), name: String(row.PROVEEDOR || ''), domain: String(row.DOMINIO || ''), taxId: String(row.CIF_NIF || ''),
     aliases: String(row.ALIASES || '').split(';').map(function (value) { return value.trim(); }).filter(Boolean), active: toBoolean_(row.ACTIVO), evidence: String(row.EVIDENCIA || row.OBSERVACIONES || ''),
-    updatedAt: row.FECHA_ACTUALIZACION ? String(row.FECHA_ACTUALIZACION) : '', updatedBy: String(row.ACTUALIZADO_POR || ''), invoiceCount: 0, __row: row.__row,
+    updatedAt: row.FECHA_ACTUALIZACION ? String(row.FECHA_ACTUALIZACION) : '', updatedBy: String(row.ACTUALIZADO_POR || ''), invoiceCount: 0,
+    recurrent: frequency !== 'NONE', frequency: frequency,
+    schedule: { supplierId: String(row.ID_PROVEEDOR || ('legacy-' + row.__row)), frequency: frequency, expectedDay: row.DIA_ESPERADO === '' || row.DIA_ESPERADO === undefined ? undefined : Number(row.DIA_ESPERADO), anchorMonth: row.MES_ANCLA === '' || row.MES_ANCLA === undefined ? undefined : Number(row.MES_ANCLA), excludedPeriods: safeJsonParse_(row.PERIODOS_EXCLUIDOS_JSON, []), evidence: String(row.EVIDENCIA_FRECUENCIA || '') },
+    recurrenceSuggested: false, __row: row.__row,
   };
 }
 
@@ -183,23 +188,64 @@ function categoryFromRow_(row) {
 
 function categories_() { return safeRows_(APP.SHEETS.CATEGORIES).map(categoryFromRow_); }
 
+function bankFormatFromRow_(row) {
+  return {
+    id: String(row.FORMATO_ID || ''), name: String(row.NOMBRE || ''), source: String(row.FUENTE_NORMALIZADA || ''),
+    extension: String(row.EXTENSION || ''), separator: String(row.SEPARADOR || ''), headerSignature: String(row.FIRMA_CABECERAS || ''),
+    headerRow: Number(row.FILA_CABECERA || 0), mapping: safeJsonParse_(row.MAPEO_JSON, {}), currencyMode: String(row.MODO_MONEDA || 'COLUMN'),
+    fixedCurrency: String(row.MONEDA_FIJA || ''), active: toBoolean_(row.ACTIVO), native: toBoolean_(row.NATIVO),
+    createdAt: String(row.CREADO_EN || ''), createdBy: String(row.CREADO_POR || ''), updatedAt: String(row.ACTUALIZADO_EN || ''), updatedBy: String(row.ACTUALIZADO_POR || ''),
+    __row: row.__row,
+  };
+}
+
+function bankFormats_(activeOnly) {
+  return safeRows_(APP.SHEETS.BANK_FORMATS).map(bankFormatFromRow_).filter(function (item) { return !activeOnly || item.active; });
+}
+
+function supplierRuleFromRow_(row) {
+  return {
+    id: String(row.REGLA_ID || ''), supplierId: String(row.PROVEEDOR_ID || ''), type: String(row.TIPO || ''),
+    pattern: String(row.PATRON || ''), value: String(row.VALOR || ''), active: toBoolean_(row.ACTIVA), evidence: String(row.EVIDENCIA || ''),
+    createdAt: String(row.CREADO_EN || ''), createdBy: String(row.CREADO_POR || ''), updatedAt: String(row.ACTUALIZADO_EN || ''), updatedBy: String(row.ACTUALIZADO_POR || ''),
+    deactivatedAt: String(row.DESACTIVADO_EN || '') || undefined, deactivatedBy: String(row.DESACTIVADO_POR || '') || undefined, deactivationReason: String(row.MOTIVO_DESACTIVACION || '') || undefined,
+    __row: row.__row,
+  };
+}
+
+function supplierRules_(supplierId, activeOnly, rows) {
+  return (rows || safeRows_(APP.SHEETS.SUPPLIER_RULES)).map(supplierRuleFromRow_).filter(function (rule) {
+    return (!supplierId || rule.supplierId === String(supplierId)) && (!activeOnly || rule.active);
+  });
+}
+
+function coverageFromRow_(row) {
+  return {
+    id: String(row.COBERTURA_ID || ''), sourceType: String(row.TIPO_FUENTE || ''), sourceId: String(row.FUENTE_ID || ''), sourceName: String(row.FUENTE_NOMBRE || ''),
+    from: parseDate_(row.DESDE), to: parseDate_(row.HASTA), status: String(row.ESTADO || 'PARCIAL'), detail: String(row.DETALLE || ''),
+    batchIds: safeJsonParse_(row.LOTE_IDS_JSON, []), importId: String(row.IMPORT_ID || '') || undefined, movementCount: Number(row.MOVIMIENTOS || 0),
+    createdAt: String(row.CREADO_EN || ''), createdBy: String(row.CREADO_POR || ''), __row: row.__row,
+  };
+}
+
 function exportFromRow_(row) {
   return { id: String(row.EXPORTACION_ID || ''), period: String(row.PERIODO || ''), status: String(row.ESTADO || ''), folderUrl: String(row.CARPETA_URL || '') || undefined, files: safeJsonParse_(row.ARCHIVOS_JSON, []), manifestHash: String(row.MANIFEST_HASH || '') || undefined, createdAt: String(row.CREADO_EN || ''), createdBy: String(row.CREADO_POR || ''), error: String(row.ERROR || '') || undefined };
 }
 
-function batchFromRow_(row) {
-  const documents = getRows_(APP.SHEETS.DOCUMENTS).filter(function (doc) { return String(doc.LOTE_ID) === String(row.LOTE_ID); }).map(documentFromRow_);
+function batchFromRow_(row, documentRows) {
+  const documents = (documentRows || getRows_(APP.SHEETS.DOCUMENTS)).filter(function (doc) { return String(doc.LOTE_ID) === String(row.LOTE_ID); }).map(documentFromRow_);
   return { id: String(row.LOTE_ID || ''), status: String(row.ESTADO || ''), dateFrom: parseDate_(row.FECHA_DESDE), dateTo: parseDate_(row.FECHA_HASTA), requestedEmails: Number(row.MAX_CORREOS || 0), reviewedEmails: Number(row.CORREOS_REVISADOS || 0), pdfCount: Number(row.PDF_ENCONTRADOS || 0), progress: Number(row.PROGRESO || 0), createdAt: String(row.CREADO_EN || ''), createdBy: String(row.CREADO_POR || ''), approvedAt: String(row.APROBADO_EN || '') || undefined, approvedBy: String(row.APROBADO_POR || '') || undefined, cursor: String(row.CURSOR || ''), nextSearchDate: parseDate_(row.FECHA_BUSQUEDA) || undefined, cancelReason: String(row.MOTIVO_CANCELACION || '') || undefined, documents: documents, error: String(row.ERROR || '') || undefined, __row: row.__row };
 }
 
-function getActiveBatch_() {
+function getActiveBatch_(batchRows, documentRows) {
   const activeStates = ['BORRADOR', 'ANALIZANDO', 'PENDIENTE DE APROBACIÓN', 'EJECUTANDO', 'INTERRUMPIDO', 'COMPLETADO CON ERRORES'];
-  const rows = getRows_(APP.SHEETS.BATCHES).filter(function (row) { return String(row.TIPO || 'GMAIL') === 'GMAIL' && activeStates.indexOf(String(row.ESTADO)) !== -1; });
-  return rows.length ? batchFromRow_(rows[rows.length - 1]) : null;
+  const rows = (batchRows || getRows_(APP.SHEETS.BATCHES)).filter(function (row) { return String(row.TIPO || 'GMAIL') === 'GMAIL' && activeStates.indexOf(String(row.ESTADO)) !== -1; });
+  return rows.length ? batchFromRow_(rows[rows.length - 1], documentRows) : null;
 }
 
 function reviewDocuments_() {
-  return getRows_(APP.SHEETS.DOCUMENTS).filter(function (row) {
+  const documentRows = arguments[0];
+  return (documentRows || getRows_(APP.SHEETS.DOCUMENTS)).filter(function (row) {
     const phase = String(row.FASE || '');
     return phase === 'EN REVISIÓN' || phase === 'ERROR' || phase === 'LISTO PARA APROBAR';
   }).map(documentFromRow_);

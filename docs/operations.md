@@ -32,8 +32,16 @@ Si un lote se preparó con un alcance incorrecto, usar **Cancelar lote sin escri
 
 - La previsualización detecta el periodo real y advierte si no coincide con el declarado o si la cobertura no identifica un mes parcial.
 - **Descartar vista previa** cancela sus filas técnicas y envía el temporal a la papelera de Drive.
-- Primero se confirma y archiva el extracto; después se deciden individualmente las conciliaciones propuestas.
+- Primero se confirma y archiva el extracto; después se deciden las conciliaciones propuestas, individualmente o en un conjunto expresamente seleccionado.
 - Una ausencia de coincidencia no acredita impago.
+
+## Revisión semanal y cobertura
+
+- La mesa semanal agrupa tareas calculadas en `Capturar`, `Validar`, `Conciliar` y `Cerrar`; no crea un segundo registro contable.
+- El mapa conserva cada intervalo de Gmail y cada fuente bancaria por separado. Un hueco nunca se rellena por inferencia.
+- Antes de continuar un lote, comprobar el punto exacto que muestra el carril Gmail, incluidos mensajes todavía pendientes del mismo día.
+- Una propuesta de confianza alta sigue necesitando confirmación humana. Los casos múltiples, parciales o ambiguos se resuelven en la matriz avanzada.
+- Las reglas y frecuencias de proveedor solo generan sugerencias. Desactivar una regla conserva su auditoría.
 
 ## Activadores
 
@@ -42,7 +50,7 @@ La pantalla Configuración muestra todos los activadores visibles para el propie
 ## Reversión
 
 - Volver a desplegar la versión Apps Script anterior.
-- Mantener las pestañas y columnas aditivas; no borrar registros de auditoría.
+- Mantener las pestañas y columnas aditivas, incluidas coberturas y reglas de proveedor; no borrar registros de auditoría.
 - Fusionar proveedores solo con motivo acreditado: se desactiva el origen, se trasladan los documentos pendientes y no se reescribe el histórico.
 - Usar la copia previa de la hoja para comparar, no para sobrescribir silenciosamente producción.
 - Nunca borrar automáticamente facturas ya aprobadas.
